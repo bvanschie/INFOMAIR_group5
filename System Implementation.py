@@ -8,9 +8,9 @@ from tensorflow.python.autograph.pyct import transformer
 
 from tensorflow.python.keras.models import model_from_json
 import pandas
-#terminal: pip install python-levenshtein
+# terminal: pip install python-levenshtein
 from Levenshtein import distance as levenshtein_distance
-
+from collections import defaultdict
 
 # load json and create model
 json_file = open('data/model.json', 'r')
@@ -20,12 +20,13 @@ model = model_from_json(loaded_model_json)
 # load weights into new model
 model.load_weights("data/model.h5")
 
-
 restaurant_info = pandas.read_csv("data/restaurant_info.csv")
 transformer = TfidfTransformer()
 loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("data/feature.pkl", "rb")))
 
 # Constants
+MIN_LEVENSHTEIN_DISTANCE = 3
+
 BASELINE_DIALOG_ACT = "inform"
 DIALOG_ACTS = [
     "ack",
@@ -80,6 +81,7 @@ domain_terms = {
     "pricerange": list(restaurant_info["pricerange"].dropna().unique())
 }
 
+
 # Utility functions
 
 def extract_dialog_act(user_input):
@@ -99,12 +101,7 @@ def extract_preferences(dialog_state):
     :return:
     """
 
-    preferences = {
-        "food": "dontcare",
-        "area": "dontcare",
-        "pricerange": "dontcare"
-    }
-
+    preferences = defaultdict(lambda: "dontcare")
     current_state = "" if not dialog_state["states"] else dialog_state["states"][0]
 
     regexes = {
@@ -117,13 +114,13 @@ def extract_preferences(dialog_state):
         "food": [
             domain_terms["food"],
             "(\w+)(?=\s+food)",
-            "(?<=(a\s))(\w+)(?=\srestaurant)"
+
         ],
         "pricerange": [
-            domain_terms["pricerange"]
+            domain_terms["pricerange"],
+            "(?<=a\s)(\w+)(?=\srestaurant)"
         ]
     }
-
 
     for slot_filler, slot_regexes in regexes.items():
         for slot_regex in slot_regexes:
@@ -139,10 +136,8 @@ def extract_preferences(dialog_state):
                 preferences[slot_filler] = match.group(1)
                 break
 
-
-
     # Miscellaneous cases (e.g. any)
-    if re.search("^any$", dialog_state["user_utterance"]):
+    if re.search("^any$|^it doesnt matter$", dialog_state["user_utterance"]):
         if ("food" in current_state):
             preferences["food"] = "dontcare"
         elif ("area" in current_state):
@@ -154,34 +149,37 @@ def extract_preferences(dialog_state):
         if pref_value == "any":
             preferences[pref_name] = "dontcare"
 
+    # If user utterance is only one word, check for minimal edit distance with domain terms (e.g. "spenish")
+    if len(dialog_state["user_utterance"].split()) == 1:
+        preferences = levenshtein_edit_distance(dialog_state["user_utterance"])
+
     return preferences
 
 
-
-
-def levenshtein_edit_distance(pref_name, pref_value, domain_terms):
+def levenshtein_edit_distance(pref_value):
     """
     Use Levenshtein edit distance as implemented in the python-Levenshtein library to map values
     to the closest domain term in case an exact match is not found.
     :return:
     """
-    min_distance = 3
     best_match = []
 
-    for term in domain_terms:
-        distance = levenshtein_distance(pref_value, term)
-        if distance <= min_distance:
-            min_distance = distance
-            best_match.append({"term": term,
-                               "distance": distance})
+    for domain in domain_terms:
+        for term in domain_terms[domain]:
+            distance = levenshtein_distance(pref_value, term)
+            if distance <= MIN_LEVENSHTEIN_DISTANCE:
+                min_distance = distance
+                best_match.append({"term": term,
+                                   "distance": distance,
+                                   "domain": domain})
 
     if not best_match:
         return False
     else:
         best_match = list(filter(lambda d: d["distance"] == min_distance, best_match))
-        best_match = random.shuffle(best_match)
+        random.shuffle(best_match)
 
-    return best_match[0]
+    return {best_match[0]["domain"]: best_match[0]["term"]}
 
 
 def rule_based_dialog_classifier(user_utterance):
@@ -231,23 +229,22 @@ def inform_response(dialog_state):
 
     # Apply Levenshtein Edit Distance if no exact match with domain terms is found
     for pref_name, pref_value in preferences.items():
-        if pref_value != "dontcare" and pref_value not in domain_terms[pref_name]:
-            levenshtein = levenshtein_edit_distance(pref_name=pref_name,
-                                                    pref_value=pref_value,
-                                                    domain_terms=domain_terms[pref_name])
+        if pref_value not in domain_terms[pref_name] and pref_value != "dontcare":
+            levenshtein = levenshtein_edit_distance(pref_value=pref_value)
 
             if levenshtein == False:
-                dialog_state["system_utterances"].insert(0, f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
+                dialog_state["system_utterances"].insert(0,
+                                                         f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
                 return dialog_state
             else:
-                preferences[pref_name] = levenshtein
-
+                preferences[levenshtein["domain"]] = levenshtein["term"]
 
     # Fill slots
     for slot in dialog_state["slots"]:
-        if preferences[slot["name"]] != "":
-            slot["filler"] = preferences[slot["name"]]
-            break
+        for pref_name, pref_value in preferences.items():
+            if slot["name"] == pref_name:
+                slot["filler"] = pref_value
+                break
 
     # Create a list of filters
     query = ""
@@ -268,13 +265,13 @@ def inform_response(dialog_state):
     # Decide based on number of found matching restaurants
     num_matched_restaurants = len(dialog_state["matched_restaurants"])
 
-
     # Assignment: If the number of restaurants satisfying the current set of preferences is 0, then the user should be informed and given the option to retract and restate any number of previously stated preferences.
     if num_matched_restaurants == 0:
         # Assigment: If the number of restaurants satisfying the current set of preferences is 0 then the system should offer alternatives for the conflicting preferences.
         # Assigmment: TODO The alternatives should be modeled using a set membership function. Of course an alternative should only be offered if the new set of preferences is satisfiable in the database.
 
-        restaurant_filters = random.shuffle(restaurant_filters).remove()
+        random.shuffle(restaurant_filters)
+        del restaurant_filters[0]
         query = "(" + ") and (".join(restaurant_filters) + ")"
         dialog_state["alternative_restaurants"] = query_restaurant_info(query)
         restaurant_one = dialog_state["alternative_restaurants"][0]
@@ -282,8 +279,8 @@ def inform_response(dialog_state):
 
         system_utterance = f"""there are no suggestions that satisfy your preferences.
           The following restaurants are available:
-      1. Restaurant {restaurant_one["name"]} serving {restaurant_one["food"]} in {restaurant_one["area"]} part of town for {restaurant_one["price_type"]}
-      2. Restaurant {restaurant_two["name"]} serving {restaurant_two["food"]} in {restaurant_two["area"]} part of town for {restaurant_two["price_type"]}
+      1. Restaurant {restaurant_one["restaurantname"]} serving {restaurant_one["food"]} in {restaurant_one["area"]} part of town for {restaurant_one["price_type"]}
+      2. Restaurant {restaurant_two["restaurantname"]} serving {restaurant_two["food"]} in {restaurant_two["area"]} part of town for {restaurant_two["price_type"]}
       Do you want to:
       a. change your preferences
       b. choose one of these alternatives?
@@ -344,8 +341,6 @@ def state_transition(dialog_state):
     elif dialog_act == "restart":
         pass
 
-
-
     # TODO: Needs to be expanded
 
     return dialog_state
@@ -364,9 +359,9 @@ try:
 
         # if there are no system utterances available, use welcome message
         if not dialog_state["system_utterances"]:
-            user_utterance = input(welcome_message)
+            dialog_state["user_utterance"] = input(welcome_message)
         else:
-            user_utterance = input(f'System: {dialog_state["system_utterances"][0]}')
+            dialog_state["user_utterance"] = input(f'System: {dialog_state["system_utterances"][0]}')
 
         dialog_state = state_transition(dialog_state)
         counter += 1
