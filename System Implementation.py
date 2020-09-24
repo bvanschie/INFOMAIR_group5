@@ -9,45 +9,45 @@ from tensorflow.python.autograph.pyct import transformer
 
 from tensorflow.python.keras.models import model_from_json
 import pandas
-#!pip install python-levenshtein
+#terminal: pip install python-levenshtein
 from Levenshtein import distance as levenshtein_distance
 from urllib.request import urlretrieve
 
 
 # downloads
-DSTC2_url = "https://drive.google.com/uc?export=download&id=1bQ9EX8-W_Bo991qrt96j6xQtxYeYk5aR"
-if not os.path.isfile("DSTC2.dat"):
-    urlretrieve(DSTC2_url, "DSTC2.dat")[0]
-
-BOW_url = "https://drive.google.com/uc?export=download&id=10YeM4oauT2z09Wn48hE8evNh3MrLgNqC"
-if not os.path.isfile("feature.pkl"):
-    urlretrieve(BOW_url, "feature.pkl")[0]
-
-restaurant_info_url = 'https://drive.google.com/uc?export=download&id=1GnG_Mmgvs7488Ybp0y3Iy2G1v_V_OSuF'
-if not os.path.isfile("restaurant_info.csv"):
-    urlretrieve(restaurant_info_url, "restaurant_info.csv")[0]
-
-model_h5_url = "https://drive.google.com/uc?export=download&id=1ZyzC_YEvsvg5C9IM9RjjJU1vMF-cJSZ_"
-if not os.path.isfile("model.h5"):
-    urlretrieve(model_h5_url, "model.h5")[0]
-
-model_json_url = "https://drive.google.com/uc?export=download&id=1u_-OCMgN0JtHZuEXmS-N_wDkUUppYV54"
-if not os.path.isfile("model.json"):
-    urlretrieve(model_json_url, "model.json")[0]
+# DSTC2_url = "https://drive.google.com/uc?export=download&id=1bQ9EX8-W_Bo991qrt96j6xQtxYeYk5aR"
+# if not os.path.isfile("DSTC2.dat"):
+#     urlretrieve(DSTC2_url, "DSTC2.dat")[0]
+#
+# BOW_url = "https://drive.google.com/uc?export=download&id=10YeM4oauT2z09Wn48hE8evNh3MrLgNqC"
+# if not os.path.isfile("feature.pkl"):
+#     urlretrieve(BOW_url, "feature.pkl")[0]
+#
+# restaurant_info_url = 'https://drive.google.com/uc?export=download&id=1GnG_Mmgvs7488Ybp0y3Iy2G1v_V_OSuF'
+# if not os.path.isfile("restaurant_info.csv"):
+#     urlretrieve(restaurant_info_url, "restaurant_info.csv")[0]
+#
+# model_h5_url = "https://drive.google.com/uc?export=download&id=1ZyzC_YEvsvg5C9IM9RjjJU1vMF-cJSZ_"
+# if not os.path.isfile("model.h5"):
+#     urlretrieve(model_h5_url, "model.h5")[0]
+#
+# model_json_url = "https://drive.google.com/uc?export=download&id=1u_-OCMgN0JtHZuEXmS-N_wDkUUppYV54"
+# if not os.path.isfile("model.json"):
+#     urlretrieve(model_json_url, "model.json")[0]
 
 
 # load json and create model
-json_file = open('model.json', 'r')
+json_file = open('data/model.json', 'r')
 loaded_model_json = json_file.read()
 json_file.close()
 model = model_from_json(loaded_model_json)
 # load weights into new model
-model.load_weights("model.h5")
+model.load_weights("data/model.h5")
 
 
-restaurant_info = pandas.read_csv("restaurant_info.csv")
+restaurant_info = pandas.read_csv("data/restaurant_info.csv")
 transformer = TfidfTransformer()
-loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("feature.pkl", "rb")))
+loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("data/feature.pkl", "rb")))
 
 # Constants
 BASELINE_DIALOG_ACT = "inform"
