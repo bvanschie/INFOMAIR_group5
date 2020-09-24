@@ -11,7 +11,7 @@ import pandas
 # terminal: pip install python-levenshtein
 from Levenshtein import distance as levenshtein_distance
 from collections import defaultdict
-# even iets proberen
+
 # load json and create model
 json_file = open('data/model.json', 'r')
 loaded_model_json = json_file.read()
@@ -76,9 +76,9 @@ dialog_state = {
 }
 
 domain_terms = {
-    "food": list(restaurant_info["food"].dropna().unique()),
-    "area": list(restaurant_info["area"].dropna().unique()),
-    "pricerange": list(restaurant_info["pricerange"].dropna().unique())
+    "food": list(restaurant_info["food"].dropna().unique()),  # a list of food types that are represented in the data
+    "area": list(restaurant_info["area"].dropna().unique()),  # a list of area's that are represented in the data
+    "pricerange": list(restaurant_info["pricerange"].dropna().unique())     # a list of price ranges that are represented in the data
 }
 
 
@@ -121,7 +121,7 @@ def extract_preferences(dialog_state):
             "(?<=a\s)(\w+)(?=\srestaurant)"
         ]
     }
-
+    # for each regular expression defined per domain search for a match with the current user utterance
     for slot_filler, slot_regexes in regexes.items():
         for slot_regex in slot_regexes:
             if type(slot_regex) is list:
@@ -132,7 +132,7 @@ def extract_preferences(dialog_state):
             else:
                 match = re.search(slot_regex, dialog_state["user_utterance"])
 
-            if match:
+            if match: # if a match is found, save the match in the corresponding slot in preferences
                 preferences[slot_filler] = match.group(1)
                 break
 
@@ -145,6 +145,7 @@ def extract_preferences(dialog_state):
         elif ("price" in current_state):
             preferences["pricerange"] = "dontcare"
 
+    # save cases with 'any' in the utterances as dontcare
     for pref_name, pref_value in preferences.items():
         if pref_value == "any":
             preferences[pref_name] = "dontcare"
@@ -166,23 +167,28 @@ def levenshtein_edit_distance(pref_value):
 
     for domain in domain_terms:
         for term in domain_terms[domain]:
-            distance = levenshtein_distance(pref_value, term)
+            distance = levenshtein_distance(pref_value, term)   # calculate the levenshtein_distance from the pref_value to every term in the database
             if distance <= MIN_LEVENSHTEIN_DISTANCE:
                 min_distance = distance
-                best_match.append({"term": term,
-                                   "distance": distance,
+                best_match.append({"term": term,                # save a term with a distance that is smaller than MIN_LEVENSHTEIN_DISTANCE to best_match
+                                   "distance": distance,        # with its domain
                                    "domain": domain})
 
     if not best_match:
         return False
     else:
-        best_match = list(filter(lambda d: d["distance"] == min_distance, best_match))
-        random.shuffle(best_match)
+        best_match = list(filter(lambda d: d["distance"] == min_distance, best_match)) # extract the terms with the lowest distance
+        random.shuffle(best_match)  #randomly choose one of the best matches
 
     return {best_match[0]["domain"]: best_match[0]["term"]}
 
 
 def rule_based_dialog_classifier(user_utterance):
+    """
+    Looks for certain words or phrases to deduce which dialog
+    act should be given to the user utterance
+    """
+
     dialog_act = ""
 
     regexes = {
@@ -219,7 +225,7 @@ def query_restaurant_info(query):
 
 def inform_response(dialog_state):
     """
-    Create response in case if inform dialog act
+    Create response in case of inform dialog act
     :param dialog_state:
     :return: dialog_state
     """
@@ -232,7 +238,7 @@ def inform_response(dialog_state):
         if pref_value not in domain_terms[pref_name] and pref_value != "dontcare":
             levenshtein = levenshtein_edit_distance(pref_value=pref_value)
 
-            if levenshtein == False:
+            if levenshtein == False: #if no match is found in the database, return feedback to user
                 dialog_state["system_utterances"].insert(0,
                                                          f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
                 return dialog_state
@@ -316,9 +322,9 @@ def state_transition(dialog_state):
 
     dialog_act_softmax = extract_dialog_act(dialog_state["user_utterance"])
     dialog_act = DIALOG_ACTS[np.argmax(dialog_act_softmax)]
-    dialog_act_prob = dialog_act_softmax.max()
+    dialog_act_prob = dialog_act_softmax.max() # gives the probability of the dialog acts with the highest probability
 
-    if dialog_act_prob < 0.8:
+    if dialog_act_prob < 0.8: # if the probability is low, check with a rule based classifier if we can classify it correctly
         dialog_act = rule_based_dialog_classifier(dialog_state["user_utterance"])
         dialog_act_prob = 1
 
@@ -326,22 +332,47 @@ def state_transition(dialog_state):
     if dialog_act == "inform":
         dialog_state = inform_response(dialog_state)
 
-    elif dialog_act == "reqalt":
-        pass  # reqalt_response(dialog_state) TODO
-
-    elif dialog_act == "deny":
-        pass  # deny_response(dialog_state) TODO
+    elif dialog_act == "ack":
+        pass  # ack_response(dialog_state) TODO
 
     elif dialog_act == "affirm":
         pass  # affirm_response(dialog_state) TODO
 
+    elif dialog_act == "bye":
+        pass  # bye_response(dialog_state) TODO
+
+    elif dialog_act == "confirm":
+        pass  # confirm_response(dialog_state) TODO
+
+    elif dialog_act == "deny":
+        pass  # deny_response(dialog_state) TODO
+
+    elif dialog_act == "hello":
+        pass  # hello_response(dialog_state) TODO
+
+    elif dialog_act == "negate":
+        pass  # negate_response(dialog_state) TODO
+
     elif dialog_act == "null":
         pass
+
+    elif dialog_act == "repeat":
+        pass  # repeat_response(dialog_state) TODO
+
+    elif dialog_act == "reqalts":
+        pass  # reqalt_response(dialog_state) TODO
+
+    elif dialog_act == "reqmore":
+        pass  # reqmore_response(dialog_state) TODO
+
+    elif dialog_act == "request":
+        pass  # request_response(dialog_state) TODO
 
     elif dialog_act == "restart":
         pass
 
-    # TODO: Needs to be expanded
+    elif dialog_act == "thankyou":
+        pass  # thankyou_response(dialog_state) TODO
 
     return dialog_state
 
