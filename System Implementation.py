@@ -11,7 +11,7 @@ import pandas
 # terminal: pip install python-levenshtein
 from Levenshtein import distance as levenshtein_distance
 from collections import defaultdict
-
+# even iets proberen
 # load json and create model
 json_file = open('data/model.json', 'r')
 loaded_model_json = json_file.read()
