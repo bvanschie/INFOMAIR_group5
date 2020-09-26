@@ -72,7 +72,8 @@ dialog_state = {
     "alternative_restaurants": [],
     "system_utterances": [],
     "user_utterance": "",
-    "states": []
+    "states": [],
+    "end_conversation" : False
 }
 
 domain_terms = {
@@ -152,12 +153,12 @@ def extract_preferences(dialog_state):
 
     # If user utterance is only one word, check for minimal edit distance with domain terms (e.g. "spenish")
     if len(dialog_state["user_utterance"].split()) == 1:
-        preferences = levenshtein_edit_distance(dialog_state["user_utterance"])
+        preferences = levenshtein_edit_distance(dialog_state["user_utterance"], ["food", "area", "pricerange"])
 
     return preferences
 
 
-def levenshtein_edit_distance(pref_value):
+def levenshtein_edit_distance(pref_value, domains):
     """
     Use Levenshtein edit distance as implemented in the python-Levenshtein library to map values
     to the closest domain term in case an exact match is not found.
@@ -165,7 +166,8 @@ def levenshtein_edit_distance(pref_value):
     """
     best_match = []
 
-    for domain in domain_terms:
+    #for domain in domain_terms[pref_name]:
+    for domain in domains:
         for term in domain_terms[domain]:
             distance = levenshtein_distance(pref_value, term)   # calculate the levenshtein_distance from the pref_value to every term in the database
             if distance <= MIN_LEVENSHTEIN_DISTANCE:
@@ -201,6 +203,18 @@ def rule_based_dialog_classifier(user_utterance):
         "restart": [
             "reset",
             "start over"
+        ],
+        "bye": [
+            "bye",
+            "goodbye"
+        ],
+        "deny":[
+            "no",
+            "wrong"
+        ],
+        "confirm":[
+            "yes",
+            "that is right"
         ]
     }
 
@@ -229,21 +243,25 @@ def inform_response(dialog_state):
     :param dialog_state:
     :return: dialog_state
     """
-
+    needs_confirm = False
     system_utterance = ""
     preferences = extract_preferences(dialog_state)
 
     # Apply Levenshtein Edit Distance if no exact match with domain terms is found
     for pref_name, pref_value in preferences.items():
         if pref_value not in domain_terms[pref_name] and pref_value != "dontcare":
-            levenshtein = levenshtein_edit_distance(pref_value=pref_value)
+            levenshtein = levenshtein_edit_distance(pref_value=pref_value, domains =[pref_name])
 
             if levenshtein == False: #if no match is found in the database, return feedback to user
                 dialog_state["system_utterances"].insert(0,
                                                          f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
                 return dialog_state
             else:
-                preferences[levenshtein["domain"]] = levenshtein["term"]
+                needs_confirm = True
+
+                preferences[pref_name] = levenshtein[pref_name]
+                #return dialog_state
+               # preferences[levenshtein["domain"]] = levenshtein["term"]
 
     # Fill slots
     for slot in dialog_state["slots"]:
@@ -298,7 +316,7 @@ def inform_response(dialog_state):
 
     # Assignment: If the number of restaurants satisfying the current set of preferences is 1, then the system should not ask any remaining preferences and should immediately present the recommendation.
     elif num_matched_restaurants == 1:
-        dialog_state["system_utterances"].insert("You can eat Bart's ... ", 0)  # TODO: Improve
+        dialog_state["system_utterances"].insert(0, "You can eat Bart's ... ")  # TODO: Improve
 
     # Assigment: If the number of restaurants satisfying the current set of preferences is 2 or more then the system should proceed normally.
     elif num_matched_restaurants > 1:
@@ -307,9 +325,42 @@ def inform_response(dialog_state):
                 dialog_state["system_utterances"].insert(0, slot["question"])
                 dialog_state["states"].insert(0, f"ask {slot['name']}")
                 break
+    if needs_confirm:
+        dialog_state["system_utterances"].insert(0,
+                                                 f'Did you mean a restaurant with {levenshtein[pref_name]} {pref_name}?')
+        for slot in dialog_state["slots"]:
+            if slot["name"] == pref_name:
+                slot["confirmed"] = False
+        needs_confirm = False
+    return dialog_state
+
+def bye_response(dialog_state):
+    dialog_state["end_conversation"] = True
 
     return dialog_state
 
+def confirm_response(dialog_state):
+    for slot in dialog_state["slots"]:
+        if not slot["confirmed"]:
+            slot["confirmed"] = True
+
+    for slot in dialog_state["slots"]:
+        if slot["filler"] == "dontcare":
+            dialog_state["system_utterances"].insert(0, slot["question"])
+            dialog_state["states"].insert(0, f"ask {slot['name']}")
+
+    return dialog_state
+
+    return dialog_state
+def deny_response(dialog_state):
+    for slot in dialog_state["slots"]:
+        if not slot["confirmed"]:
+            slot["filler"] = "dontcare"
+            slot["confirmed"] = True
+            dialog_state["system_utterances"].insert(0, slot["question"])
+            dialog_state["states"].insert(0, f"ask {slot['name']}")
+    #print(dialog_state)
+    return dialog_state
 
 def state_transition(dialog_state):
     """
@@ -336,16 +387,16 @@ def state_transition(dialog_state):
         pass  # ack_response(dialog_state) TODO
 
     elif dialog_act == "affirm":
-        pass  # affirm_response(dialog_state) TODO
+        dialog_state = confirm_response(dialog_state)
 
     elif dialog_act == "bye":
-        pass  # bye_response(dialog_state) TODO
+        dialog_state = bye_response(dialog_state)
 
     elif dialog_act == "confirm":
-        pass  # confirm_response(dialog_state) TODO
+        dialog_state = confirm_response(dialog_state)
 
     elif dialog_act == "deny":
-        pass  # deny_response(dialog_state) TODO
+        dialog_state= deny_response(dialog_state)
 
     elif dialog_act == "hello":
         pass  # hello_response(dialog_state) TODO
@@ -379,8 +430,10 @@ def state_transition(dialog_state):
 
 # the system-user interaction in the python console
 counter = 0
+conversation = True
 try:
     while True:
+        #print(dialog_state["slots"])
         welcome_message = "System: Hello, welcome to the Cambridge restaurant system? You can ask for restaurants by area, price range or food type. How may I help you?"
         if counter == 0:
             dialog_state["user_utterance"] = input(welcome_message).lower()
@@ -389,10 +442,14 @@ try:
             continue
 
         # if there are no system utterances available, use welcome message
+        if dialog_state["end_conversation"]:
+            sys.exit("Thanks and goodbye!")
+            #break
         if not dialog_state["system_utterances"]:
             dialog_state["user_utterance"] = input(welcome_message)
         else:
             dialog_state["user_utterance"] = input(f'System: {dialog_state["system_utterances"][0]}')
+
 
         dialog_state = state_transition(dialog_state)
         counter += 1
