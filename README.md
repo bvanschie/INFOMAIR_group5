@@ -1,6 +1,15 @@
 # INFOMAIR_group5
 
-The project is run from the python file System Implementation.py\
+After unzipping the files, you go to the root folder and open the command line (terminal).
+First you have to install these packages (commands for the command line given):
+
+- pip install tensorflow
+- pip install python-levenshtein
+
+After installing these packages, you start project by the following command:
+
+- python "System Implementation.py"
+
 In line 53 there is a variable "first_run" declared which is set to True. With this variable set to True
 all the following classifiers are trained, tested and saved:\
 - MajorityClassifier
