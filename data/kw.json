@@ -1,0 +1,17 @@
+{
+  "ack": ["ok"],
+  "affirm": ["yes"],
+  "bye": ["bye"],
+  "confirm": ["indeed"],
+  "deny": ["not"],
+  "hello": ["hi", "hello"],
+  "inform": ["at", "in", "near"],
+  "negate": ["no"],
+  "null": [],
+  "repeat": ["repeat"],
+  "reqalts": ["anything", "else"],
+  "reqmore": ["more"],
+  "request": ["whats"],
+  "restart": ["start"],
+  "thankyou": ["thanks"]
+}

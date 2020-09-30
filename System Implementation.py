@@ -4,25 +4,100 @@ import random
 import re
 import numpy as np
 from sklearn.feature_extraction.text import TfidfTransformer, CountVectorizer
-from tensorflow.python.autograph.pyct import transformer
+import torch
+from torch.nn import Module, ReLU, Linear, Sequential, Dropout
 
-from tensorflow.python.keras.models import model_from_json
+import copy
 import pandas
 # terminal: pip install python-levenshtein
 from Levenshtein import distance as levenshtein_distance
 from collections import defaultdict
+import time
+import json
 
-# load json and create model
-json_file = open('data/model.json', 'r')
-loaded_model_json = json_file.read()
-json_file.close()
-model = model_from_json(loaded_model_json)
-# load weights into new model
-model.load_weights("data/model.h5")
+
+class Antecedent:
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+    def __repr__(self):
+        return f"{self.name, self.value}"
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class Rule:
+    def __init__(self, identifier, antecedents, consequent, truth_value):
+        self.identifier = identifier
+        self.antecedents = antecedents
+        self.consequent = consequent
+        self.truth_value = truth_value
+
+    def __repr__(self):
+        return f"{self.identifier}. {self.antecedents} => ({self.consequent}, {self.truth_value})"
+
+    def __str__(self):
+        return self.__repr__()
+
+
+RULES_ = [
+    Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food", "good")], "busy", True),
+    Rule(2, [Antecedent("food", "spanish")], "long_time", True),
+    Rule(3, [Antecedent("busy", True)], "long_time", True),
+    Rule(4, [Antecedent("long_time", True)], "children", False),
+    Rule(5, [Antecedent("busy", True)], "romantic", False),
+    Rule(6, [Antecedent("long_time", True)], "romantic", True),
+    # New rules:
+    Rule(7, [Antecedent("busy", True)], "popular", True),
+    Rule(8, [Antecedent("children", True)], "romantic", False),
+    Rule(9, [Antecedent("busy", True), Antecedent("children", True)], "loud", True),
+    Rule(10, [Antecedent("loud", True)], "romantic", False),
+    Rule(11, [Antecedent("busy", False)], "loud", False),
+    Rule(12, [Antecedent("food", "french")], "romantic", True)
+]
+
+
+def is_applicable(rule, restaurant):
+    """
+    Predicate function, returns whether a rule is applicable
+    to the given restaurant.
+    """
+    fields = restaurant.keys()
+    for a in rule.antecedents:
+        if a.name not in fields or a.value != restaurant[a.name] or rule.consequent in fields:
+            return False
+    return True
+
+
+def apply_inference(restaurant, rules):
+    """
+    Applies the provided rules to the restaurant instance.
+    :param restaurant: A dictionary representing a restaurant.
+    :param rules: The set of rules to be applied.
+    :return: The restaurant dictionary with additional fields that
+    are the result of the implications.
+    """
+    applicable = [...]
+    while applicable:
+        applicable = [r for r in rules if is_applicable(r, restaurant)]
+        for rule in applicable:
+            restaurant[rule.consequent] = rule.truth_value
+    return restaurant
+
+
+# # load json and create model
+# json_file = open('../input/mairdata/data/model.json', 'r')
+# loaded_model_json = json_file.read()
+# json_file.close()
+# model = model_from_json(loaded_model_json)
+# # load weights into new model
+# model.load_weights("../input/mairdata/data/model.h5")
 
 restaurant_info = pandas.read_csv("data/restaurant_info.csv")
-transformer = TfidfTransformer()
-loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("data/feature.pkl", "rb")))
+# transformer = TfidfTransformer()
+# loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("../input/mairdata/data/feature.pkl", "rb")))
 
 # Constants
 MIN_LEVENSHTEIN_DISTANCE = 3
@@ -46,55 +121,143 @@ DIALOG_ACTS = [
     "thankyou"
 ]
 
+LABELS = ['ack' 'affirm' 'bye' 'confirm' 'deny' 'hello' 'inform' 'negate' 'null'
+          'repeat' 'reqalts' 'reqmore' 'request' 'restart' 'thankyou']
+
 # the knowledge structure representing the dialog state/frame
-dialog_state = {
-    "slots": [
-        {
-            "name": "area",
-            "filler": "dontcare",
-            "question": "What part of town do you have in mind?",
-            "confirmed": True
-        },
-        {
-            "name": "food",
-            "filler": "dontcare",
-            "question": "What kind of food would you like?",
-            "confirmed": True
-        },
-        {
-            "name": "pricerange",
-            "filler": "dontcare",
-            "question": "What kind of price range are you looking for?",
-            "confirmed": True
-        }
-    ],
-    "matched_restaurants": [],
-    "alternative_restaurants": [],
-    "system_utterances": [],
-    "user_utterance": "",
-    "states": [],
-    "end_conversation" : False
+original_state = {
+    "values": {
+        "food": None,
+        "area": None,
+        "pricerange": None
+    },
+    "confident": {
+        "food": True,
+        "area": True,
+        "pricerange": True
+    },
+    # This contains a list of suitable restaurants with the preferences above.
+    "suitable_restaurants": [],
+    # This is the index of suggested restaurant in the list. This is needed because
+    # the user might ask for alternatives.
+    "current_index": 0,
+    "done": False,
+    "classifier": "nn",
+    "delay": False,
+    "allcaps": False
 }
 
 domain_terms = {
-    "food": list(restaurant_info["food"].dropna().unique()),  # a list of food types that are represented in the data
-    "area": list(restaurant_info["area"].dropna().unique()),  # a list of area's that are represented in the data
-    "pricerange": list(restaurant_info["pricerange"].dropna().unique())     # a list of price ranges that are represented in the data
+    "food": list(restaurant_info["food"].dropna().unique()) + ['dontcare'],
+    # a list of food types that are represented in the data
+    "area": list(restaurant_info["area"].dropna().unique()) + ['dontcare'],
+    # a list of area's that are represented in the data
+    "pricerange": list(restaurant_info["pricerange"].dropna().unique()) + ['dontcare']
+    # a list of price ranges that are represented in the data
 }
+
+# Alternative preference sets.
+ALTS = {
+    "food": [
+        ["thai", "chinese", "korean", "vietnamese", "asian" "oriental"],
+        ["mediterranean", "spanish", "portuguese", "italian", "romanian", "tuscan", "catalan"],
+        ["french", "european", "bistro", "swiss", "gastropub", "traditional"],
+        ["north" "american", "steakhouse", "british"],
+        ["lebanese", "turkish", "persian"],
+        ["international", "modern" "european", "fusion"]
+    ],
+    "pricerange": [
+        ["cheap", "moderate"],
+        ["moderate", "expensive"]
+    ],
+    "area": [
+        ["centre", "north", "west"],
+        ["centre", "north", "east"],
+        ["centre", "south", "west"],
+        ["centre", "south", "east"]
+    ]
+}
+
+
+# Loading the neural network classifier trained during 1a.
+class NeuralNetworkClassifier(Module):
+    def __init__(self, vectorizer: CountVectorizer, tfidf, hidden_size: int):
+        """
+        Init.
+        :param vectorizer: The vectorizer to use when converting the string input
+        into bag of words representation.
+        :param max_depth: The maximum depth of the tree.
+        """
+        super(NeuralNetworkClassifier, self).__init__()
+        dim = vectorizer.transform(['x']).toarray().shape[1]
+        self.net = Sequential(
+            Linear(in_features=dim, out_features=512),
+            ReLU(),
+            Dropout(0.2),
+            Linear(in_features=512, out_features=256),
+            ReLU(),
+            Dropout(0.2),
+            Linear(in_features=256, out_features=len(LABELS))
+        )
+        self.vectorizer = vectorizer
+        self.tfidf = tfidf
+
+    def forward(self, x: np.ndarray):
+        vec = self.tfidf.transform(self.vectorizer.transform(x))
+        vec = torch.tensor(vec.toarray(), dtype=torch.float32)
+        return self.net(vec)
+
+
+class KeywordClassifier:
+    """
+    This classifier uses a keyword list to determine the
+    dialog act of an utterance.
+    """
+
+    def __init__(self, keyword_dict: str):
+        """
+        Init.
+        :param keyword_dict: Path to the file containing the keywords for
+        the different labels.
+        """
+        with open(keyword_dict, 'r') as file:
+            self.keywords = json.load(file)
+        self.label_names = LABELS
+
+    def __call__(self, texts: np.ndarray) -> np.ndarray:
+        def find_keyword(s):
+            """
+            Finds the first label such that the text contains a word
+            in the list of the label's keywords.
+            :param s: The text to find the keyword in.
+            :return: The first matching label.
+            """
+            for k, _ in self.keywords.items():
+                if any([w in s.split() for w in self.keywords[k]]):
+                    return k
+            # If no keyword is matched return null.
+            return 'null'
+
+        predictions = [find_keyword(s) for s in texts]
+        return np.array([self.label_names.index(p) for p in predictions])
+
+
+neural_network = torch.load("data/ckpt.pyt")
+baseline = KeywordClassifier("data/kw.json")
 
 
 # Utility functions
 
-def extract_dialog_act(user_input):
-    tfidf = transformer.fit_transform(loaded_vec.fit_transform(np.array([user_input])))
-    bag_of_words = np.asarray(tfidf.toarray())
+def extract_dialog_act(dialog_state, user_input):
+    if dialog_state["classifier"] == "nn":
+        with torch.no_grad():
+            out = neural_network([user_input])
+        return DIALOG_ACTS[torch.argmax(out, dim=1).item()]
+    elif dialog_state["classifier"] == "baseline":
+        return baseline(user_input)
 
-    # Generate predictions for samples
-    predictions = model.predict(bag_of_words)
-    return predictions
 
-
-def extract_preferences(dialog_state):
+def extract_preferences(user_utterance):
     """
     Looks for food type, area and price range in the given sentence with a keyword-matching algorithm
     And fills slots of the frame if preferences are found
@@ -103,14 +266,15 @@ def extract_preferences(dialog_state):
     """
 
     preferences = defaultdict(lambda: "dontcare")
-    current_state = "" if not dialog_state["states"] else dialog_state["states"][0]
+    #     current_state = "" if not dialog_state["states"] else dialog_state["states"][0]
 
     regexes = {
         "area": [
             domain_terms["area"],
             "(?<=restaurant in the\s)(\w+)",
             "(any) area",
-            "(any) part"
+            "(any) part*",
+            "(\w+)(?=\s+part)",
         ],
         "food": [
             domain_terms["food"],
@@ -119,7 +283,9 @@ def extract_preferences(dialog_state):
         ],
         "pricerange": [
             domain_terms["pricerange"],
-            "(?<=a\s)(\w+)(?=\srestaurant)"
+            "(?<=a\s)(\w+)(?=\srestaurant)",
+            "(any) range",
+            "(any) price"
         ]
     }
     # for each regular expression defined per domain search for a match with the current user utterance
@@ -127,62 +293,66 @@ def extract_preferences(dialog_state):
         for slot_regex in slot_regexes:
             if type(slot_regex) is list:
                 for regex in slot_regex:
-                    match = re.search("(" + regex + ")", dialog_state["user_utterance"])
+                    match = re.search("(" + regex + ")", user_utterance)
                     if match:
                         break
             else:
-                match = re.search(slot_regex, dialog_state["user_utterance"])
+                match = re.search(slot_regex, user_utterance)
 
-            if match: # if a match is found, save the match in the corresponding slot in preferences
+            if match:  # if a match is found, save the match in the corresponding slot in preferences
                 preferences[slot_filler] = match.group(1)
                 break
 
     # Miscellaneous cases (e.g. any)
-    if re.search("^any$|^it doesnt matter$", dialog_state["user_utterance"]):
-        if ("food" in current_state):
-            preferences["food"] = "dontcare"
-        elif ("area" in current_state):
-            preferences["area"] = "dontcare"
-        elif ("price" in current_state):
-            preferences["pricerange"] = "dontcare"
+    #     if re.search("^any$|^it doesnt matter$", user_utterance):
+    #         if ("food" in current_state):
+    #             preferences["food"] = "dontcare"
+    #         elif ("area" in current_state):
+    #             preferences["area"] = "dontcare"
+    #         elif ("price" in current_state):
+    #             preferences["pricerange"] = "dontcare"
 
     # save cases with 'any' in the utterances as dontcare
     for pref_name, pref_value in preferences.items():
         if pref_value == "any":
             preferences[pref_name] = "dontcare"
+    # Check with levenshtein whether the spelling is correct. If not, it will be flagged.
+    confidence = {}
+    preferences_ = {}
+    for k, v in preferences.items():
+        out, distance = levenshtein_edit_distance(v, k)
+        if out:
+            preferences_[k] = out[k]
+            confidence[k] = distance == 0
+    return dict(preferences_), confidence
 
-    # If user utterance is only one word, check for minimal edit distance with domain terms (e.g. "spenish")
-    if len(dialog_state["user_utterance"].split()) == 1:
-        preferences = levenshtein_edit_distance(dialog_state["user_utterance"], ["food", "area", "pricerange"])
 
-    return preferences
-
-
-def levenshtein_edit_distance(pref_value, domains):
+def levenshtein_edit_distance(pref_value, domain):
     """
     Use Levenshtein edit distance as implemented in the python-Levenshtein library to map values
     to the closest domain term in case an exact match is not found.
     :return:
     """
     best_match = []
-
-    #for domain in domain_terms[pref_name]:
-    for domain in domains:
-        for term in domain_terms[domain]:
-            distance = levenshtein_distance(pref_value, term)   # calculate the levenshtein_distance from the pref_value to every term in the database
-            if distance <= MIN_LEVENSHTEIN_DISTANCE:
-                min_distance = distance
-                best_match.append({"term": term,                # save a term with a distance that is smaller than MIN_LEVENSHTEIN_DISTANCE to best_match
-                                   "distance": distance,        # with its domain
-                                   "domain": domain})
+    min_distance = MIN_LEVENSHTEIN_DISTANCE
+    for term in domain_terms[domain]:
+        distance = levenshtein_distance(pref_value,
+                                        term)  # calculate the levenshtein_distance from the pref_value to every term in the database
+        if distance <= MIN_LEVENSHTEIN_DISTANCE:
+            min_distance = min(distance, min_distance)
+            best_match.append({"term": term,
+                               # save a term with a distance that is smaller than MIN_LEVENSHTEIN_DISTANCE to best_match
+                               "distance": distance,  # with its domain
+                               "domain": domain})
 
     if not best_match:
-        return False
+        return False, False
     else:
-        best_match = list(filter(lambda d: d["distance"] == min_distance, best_match)) # extract the terms with the lowest distance
-        random.shuffle(best_match)  #randomly choose one of the best matches
+        best_match = list(
+            filter(lambda d: d["distance"] == min_distance, best_match))  # extract the terms with the lowest distance
+        random.shuffle(best_match)  # randomly choose one of the best matches
 
-    return {best_match[0]["domain"]: best_match[0]["term"]}
+    return {best_match[0]["domain"]: best_match[0]["term"]}, min_distance
 
 
 def rule_based_dialog_classifier(user_utterance):
@@ -208,11 +378,11 @@ def rule_based_dialog_classifier(user_utterance):
             "bye",
             "goodbye"
         ],
-        "deny":[
+        "deny": [
             "no",
             "wrong"
         ],
-        "confirm":[
+        "confirm": [
             "yes",
             "that is right"
         ]
@@ -237,12 +407,135 @@ def query_restaurant_info(query):
     return results
 
 
-def inform_response(dialog_state):
+def generate_query(state):
+    """
+    Generates a database query based on the preferences contained in
+    state.
+    """
+    q = []
+    for k in ["food", "area", "pricerange"]:
+        v = state["values"][k]
+        c = state["confident"][k]
+        if v is not None and v != "dontcare" and c:
+            q.append(f"({k}=='{v}')")
+    q = " and ".join(q)
+    return q
+
+
+def generate_question(dialog_state):
+    """
+    Generates the next slot filling question based on the state.
+    Returns None if all slots filled with confident values.
+    """
+    msg = None
+    # If something is already suggested no need to ask further questions.
+    if len(dialog_state["suitable_restaurants"]) > 0:
+        name = dialog_state["suitable_restaurants"][dialog_state["current_index"]]["restaurantname"]
+        return f"You can ask more information about {name} if you are interested."
+
+    # Checks for unsure values.
+    unsure = [(k, dialog_state["values"][k]) for k, v in dialog_state["confident"].items() if not v]
+    if len(unsure) > 0:
+        msg = f"Please confirm that I understood you correctly: {unsure[0][0]} to be {unsure[0][1]}?"
+
+    elif not dialog_state["values"]["food"]:
+        msg = "What kind of food do you want to eat?"
+    elif not dialog_state["values"]["area"]:
+        msg = "What part of town do you have in mind?"
+    elif not dialog_state["values"]["pricerange"]:
+        msg = "What price range?"
+    return msg
+
+
+def get_alternatives_msg(dialog_state):
+    """
+    This function will offer an alternative for one of the preferences in case
+    there is no restaurant for the current set of preferences.
+    """
+    for domain in ["food", "pricerange", "area"]:
+        for s in ALTS[domain]:
+            # If the current value is in the set find another and test it.
+            if dialog_state["values"][domain] in s:
+                for member in s:
+                    new_prefs = copy.deepcopy(dialog_state)
+                    new_prefs["values"][domain] = member
+                    rs = query_restaurant_info(generate_query(new_prefs))
+                    if len(rs):
+                        return f"Sorry, no restaurant is found given your preferences. You can try {domain} to be {member} instead."
+    # If there is nothing we can do anymore.
+    return "Sorry, no restaurants found with your preferences. Try something else!"
+
+
+def get_suggest_msg(dialog_state):
+    """
+    Returns the prompt with information about the current suggested restaurant.
+    """
+    r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
+    return f"{r['restaurantname']} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."
+
+
+def suggest(dialog_state):
+    """
+    Fills the suitable_restaurants field with suggestions, and sets
+    the index to 0.
+    """
+    msg = None
+    query = generate_query(dialog_state)
+    if len(query) > 0:
+        suggested = query_restaurant_info(query)
+        dialog_state["suitable_restaurants"] = suggested
+        dialog_state["current_index"] = 0
+        if len(suggested) > 0:
+            msg = get_suggest_msg(dialog_state)
+
+    return dialog_state, msg
+
+
+def inform_response(dialog_state, user_utterance):
     """
     Create response in case of inform dialog act
-    :param dialog_state:
-    :return: dialog_state
+    :param dialog_state: The state dict.
+    :param user_utterance: The user input.
+    :return: dialog_state, system utterance
     """
+    prefs, conf = extract_preferences(user_utterance)
+    # Updating the state with w/e is extracted from the utterance.
+    print(f"LOG::Extracted preferences: {prefs}")
+    dialog_state["values"].update(prefs)
+    dialog_state["confident"].update(conf)
+    #     # If confident of some slots is false it means we used a levansthein distance ==> not sure about it,
+    #     # ask to be sure. We only ask one slot at a time.
+    #     unsure = [(k, dialog_state["values"][k]) for k, v in dialog_state["confident"].items() if not v]
+    #     if len(unsure) > 0:
+    #         msg = f"Please confirm that I understood you correctly: {unsure[0][0]} to be {unsure[0][1]}?"
+    #     else:
+    msg = generate_question(dialog_state)
+    if msg:  # Not all slots are filled, because there is still a question to ask.
+        # Make a suggestion to see how many restaurants are suitable so far.
+        # Only do it if there is at least one slot filled with confidence.
+        if any([dialog_state["confident"][d] and dialog_state["values"][d] not in [None, False, "dontcare"] for d in
+                ["food", "area", "pricerange"]]):
+            dialog_state, suggestion = suggest(dialog_state)
+            r = dialog_state["suitable_restaurants"]
+
+            # No match. Offers alternatives.
+            if len(r) == 0:
+                msg = get_alternatives_msg(dialog_state)
+            # Only one match, suggest it.
+            if len(r) == 1:
+                msg = suggestion
+            else:
+                # Undo the suggestion if it is not obvious.
+                dialog_state["current_index"] = 0
+                dialog_state["suitable_restaurants"] = []
+
+    if not msg:  # All slots filled.
+        # Make suggestion.
+        dialog_state, msg = suggest(dialog_state)
+    return dialog_state, msg
+
+    ############################################################################################################################## --- OLD
+
     needs_confirm = False
     system_utterance = ""
     preferences = extract_preferences(dialog_state)
@@ -250,9 +543,9 @@ def inform_response(dialog_state):
     # Apply Levenshtein Edit Distance if no exact match with domain terms is found
     for pref_name, pref_value in preferences.items():
         if pref_value not in domain_terms[pref_name] and pref_value != "dontcare":
-            levenshtein = levenshtein_edit_distance(pref_value=pref_value, domains =[pref_name])
+            levenshtein, _ = levenshtein_edit_distance(pref_value=pref_value, domains=[pref_name])
 
-            if levenshtein == False: #if no match is found in the database, return feedback to user
+            if levenshtein == False:  # if no match is found in the database, return feedback to user
                 dialog_state["system_utterances"].insert(0,
                                                          f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
                 return dialog_state
@@ -260,8 +553,8 @@ def inform_response(dialog_state):
                 needs_confirm = True
 
                 preferences[pref_name] = levenshtein[pref_name]
-                #return dialog_state
-               # preferences[levenshtein["domain"]] = levenshtein["term"]
+                # return dialog_state
+            # preferences[levenshtein["domain"]] = levenshtein["term"]
 
     # Fill slots
     for slot in dialog_state["slots"]:
@@ -334,75 +627,165 @@ def inform_response(dialog_state):
         needs_confirm = False
     return dialog_state
 
-def bye_response(dialog_state):
-    dialog_state["end_conversation"] = True
+
+def bye_response(dialog_state, user_utterance):
+    dialog_state["done"] = True
+    return dialog_state, "Thank you for choosing our services, goodbye!"
 
     return dialog_state
 
-def confirm_response(dialog_state):
-    for slot in dialog_state["slots"]:
-        if not slot["confirmed"]:
-            slot["confirmed"] = True
 
-    for slot in dialog_state["slots"]:
-        if slot["filler"] == "dontcare":
-            dialog_state["system_utterances"].insert(0, slot["question"])
-            dialog_state["states"].insert(0, f"ask {slot['name']}")
+def confirm_response(dialog_state, user_utterance):
+    for k, v in dialog_state["confident"].items():
+        if v == False:
+            dialog_state["confident"][k] = True
+            break
 
-    return dialog_state
+    return dialog_state, generate_question(dialog_state)
 
-    return dialog_state
-def deny_response(dialog_state):
-    for slot in dialog_state["slots"]:
-        if not slot["confirmed"]:
-            slot["filler"] = "dontcare"
-            slot["confirmed"] = True
-            dialog_state["system_utterances"].insert(0, slot["question"])
-            dialog_state["states"].insert(0, f"ask {slot['name']}")
-    #print(dialog_state)
-    return dialog_state
 
-def state_transition(dialog_state):
+def deny_response(dialog_state, user_utterance):
+    # The user denied when we asked for confirmation.
+    # Delete the slot.
+    for k, v in dialog_state["confident"].items():
+        if v == False:
+            dialog_state["confident"][k] = True
+            dialog_state["values"][k] = None
+            break
+
+    return dialog_state, generate_question(dialog_state)
+
+
+def reqalt_response(dialog_state, user_utterance):
+    # If there are other suitable restaurants suggest on of those.
+    if dialog_state["current_index"] < len(dialog_state["suitable_restaurants"]) - 1:
+        dialog_state["current_index"] += 1
+        return dialog_state, get_suggest_msg(dialog_state)
+    # There are no other suitable restaurants.
+    else:
+        return dialog_state, "Unfortunately there are no more restaurants with your preferences."
+
+
+def info_extracting(user_utterance):
+    output = []
+    regexes = {
+        "postcode": ["post code"],
+        "addr": ["add?ress?"],
+        "phone": ["phone( number)?"],
+        "food": ["(type of )?food"],
+        "pricerange": ["price range"],
+        "area": ["area"],
+        "busy": ["busy"],
+        "children": ["children"],
+        "long_time": ["long time"],
+        "lout": ["loud"],
+        "romantic": ["romantic"]
+    }
+    for slot_filler, slot_regexes in regexes.items():
+        for slot_regex in slot_regexes:
+            match = re.search("(" + slot_regex + ")", user_utterance)
+            if match:
+                output.append(slot_filler)
+
+    return output
+
+
+def request_response(dialog_state, user_utterance):
+    reqs = info_extracting(user_utterance)
+    idx = dialog_state["current_index"]
+    restaurant = dialog_state["suitable_restaurants"][idx]
+    # Apply inferences.
+    restaurant = apply_inference(restaurant, RULES_)
+    print(restaurant)
+    info = []
+    for d in reqs:
+        try:
+            print("In truy with ", d, restaurant[d])
+            info.append(f"{d} is {restaurant[d]}")
+        except KeyError:
+            info.append(f"{d} is unknown.")
+    #     reqs = [f"{d} is {dialog_state['suitable_restaurants'][idx][d]}" for d in reqs]
+    msg = ", ".join(info)
+    return dialog_state, f"Information about {dialog_state['suitable_restaurants'][idx]['restaurantname']}: " + msg
+
+
+def state_transition(dialog_state: dict, user_utterance: str):
     """
     The main dialog manager though which everything runs
-    :param dialog_state:
-    :return:
+    :param dialog_state: The sate dictionary.
+    :param user_utterance: The user input.
+    :return: The system utterance and the new state.
     """
+    global MIN_LEVENSHTEIN_DISTANCE
+    # First look for special commands that toggle options.
+    if user_utterance == "restart":
+        return copy.deepcopy(
+            original_state), "Welcome to the restaurant recommendation system! Please state your preferences."
+    # Example: Levensthein 5
+    if user_utterance.startswith("levenshtein"):
+        try:
+            dist = int(user_utterance.split()[-1])
+            MIN_LEVENSHTEIN_DISTANCE = dist
+            return dialog_state, f"Levenshtein distance set to {dist}"
+        except:
+            pass
+    if user_utterance == "use nn":
+        dialog_state["classifier"] = "nn"
+        return dialog_state, "Classifier set to be the neural network."
 
-    system_utterance = ""
+    if user_utterance == "use baseline":
+        dialog_state["classifier"] = "baseline"
+        return dialog_state, "Classifier set to be the baseline system."
 
-    dialog_act_softmax = extract_dialog_act(dialog_state["user_utterance"])
-    dialog_act = DIALOG_ACTS[np.argmax(dialog_act_softmax)]
-    dialog_act_prob = dialog_act_softmax.max() # gives the probability of the dialog acts with the highest probability
+    if user_utterance == "delay on":
+        dialog_state["delay"] = True
+        return dialog_state, "Delay switched on."
 
-    if dialog_act_prob < 0.8: # if the probability is low, check with a rule based classifier if we can classify it correctly
-        dialog_act = rule_based_dialog_classifier(dialog_state["user_utterance"])
-        dialog_act_prob = 1
+    if user_utterance == "delay off":
+        dialog_state["delay"] = False
+        return dialog_state, "Delay switched off."
+
+    if user_utterance == "caps on":
+        dialog_state["allcaps"] = True
+        return dialog_state, "Caps switched on."
+
+    if user_utterance == "caps off":
+        dialog_state["allcaps"] = False
+        return dialog_state, "Caps switched off."
+
+    dialog_act = extract_dialog_act(dialog_state, user_utterance)
+    print(f"LOG::Classified as {dialog_act}")
 
     # respond to the different kinds of dialog acts
     if dialog_act == "inform":
-        dialog_state = inform_response(dialog_state)
+        state, msg = inform_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "ack":
         pass  # ack_response(dialog_state) TODO
 
     elif dialog_act == "affirm":
-        dialog_state = confirm_response(dialog_state)
+        state, msg = confirm_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "bye":
-        dialog_state = bye_response(dialog_state)
+        return bye_response(dialog_state, user_utterance)
 
     elif dialog_act == "confirm":
-        dialog_state = confirm_response(dialog_state)
+        state, msg = confirm_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "deny":
-        dialog_state= deny_response(dialog_state)
+        state, msg = deny_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "hello":
-        pass  # hello_response(dialog_state) TODO
+        return dialog_state, "Welcome!"
 
+    # Same as deny, as there is no difference in most practical applications.
     elif dialog_act == "negate":
-        pass  # negate_response(dialog_state) TODO
+        state, msg = deny_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "null":
         pass
@@ -411,13 +794,16 @@ def state_transition(dialog_state):
         pass  # repeat_response(dialog_state) TODO
 
     elif dialog_act == "reqalts":
-        pass  # reqalt_response(dialog_state) TODO
+        state, msg = reqalt_response(dialog_state, user_utterance)
+        return state, msg
 
+    # It does the same as reqalts in case dialog act classification goes wrong.
     elif dialog_act == "reqmore":
-        pass  # reqmore_response(dialog_state) TODO
+        state, msg = reqalt_response(dialog_state, user_utterance)
+        return state, msg
 
     elif dialog_act == "request":
-        pass  # request_response(dialog_state) TODO
+        return request_response(dialog_state, user_utterance)
 
     elif dialog_act == "restart":
         pass
@@ -425,34 +811,22 @@ def state_transition(dialog_state):
     elif dialog_act == "thankyou":
         pass  # thankyou_response(dialog_state) TODO
 
-    return dialog_state
+    # If no states match, return a question to fill slots.
+    msg = generate_question(dialog_state)
+    if msg is None:
+        msg = "Sorry, I did not understand you."
+    return dialog_state, generate_question(dialog_state)
 
 
-# the system-user interaction in the python console
-counter = 0
-conversation = True
-try:
-    while True:
-        #print(dialog_state["slots"])
-        welcome_message = "System: Hello, welcome to the Cambridge restaurant system? You can ask for restaurants by area, price range or food type. How may I help you?"
-        if counter == 0:
-            dialog_state["user_utterance"] = input(welcome_message).lower()
-            dialog_state = state_transition(dialog_state)
-            counter += 1
-            continue
-
-        # if there are no system utterances available, use welcome message
-        if dialog_state["end_conversation"]:
-            sys.exit("Thanks and goodbye!")
-            #break
-        if not dialog_state["system_utterances"]:
-            dialog_state["user_utterance"] = input(welcome_message)
-        else:
-            dialog_state["user_utterance"] = input(f'System: {dialog_state["system_utterances"][0]}')
-
-
-        dialog_state = state_transition(dialog_state)
-        counter += 1
-
-except EOFError as e:
-    sys.exit("Thanks and goodbye!")
+msg = "Welcome to the restaurant recommendation system!"
+state = copy.deepcopy(original_state)
+while True:
+    if state["delay"]:
+        time.sleep(2)
+    if state["allcaps"]:
+        msg = msg.upper()
+    print(f"(System) {msg}")
+    if state["done"]:
+        break
+    user_utterance = input("(User) ").lower()
+    state, msg = state_transition(state, user_utterance)
