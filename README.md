@@ -32,7 +32,7 @@ unknown status, as it is neither justified nor overruled.
 
 The following options are supported, with examples:
 
-* Restart dialog. `>> restart`
+* Restart dialog. `restart`
 * Set minimum Levenshtein edit distance. `Levenshtein 5` (Sets it to 5).
 * Choose which classifier to use (baseline or neural network) `use nn` or `use baseline`.
 * Introduce a delay before showing system responses. `delay on` or `delay off`.
