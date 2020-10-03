@@ -2,9 +2,10 @@
 
 ## Installation
 
-The project uses pytorch. It can be installed by following the instructions [here](https://pytorch.org/get-started/locally/).
+The project uses PyTorch. It can be installed by following the instructions [here](https://pytorch.org/get-started/locally/).
 
-TODO: The rest is done via pip?
+After installing PyTorch you will need the Python Levenshtein library via the following command:
+- pip install python-levenshtein
 
 ## Inference rules
 
