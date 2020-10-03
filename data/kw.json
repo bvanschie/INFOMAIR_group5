@@ -5,13 +5,13 @@
   "confirm": ["indeed"],
   "deny": ["not"],
   "hello": ["hi", "hello"],
-  "inform": ["at", "in", "near"],
+  "inform": ["at", "in", "near", "food"],
   "negate": ["no"],
   "null": [],
   "repeat": ["repeat"],
   "reqalts": ["anything", "else"],
   "reqmore": ["more"],
-  "request": ["whats"],
+  "request": ["whats", "phone", "address"],
   "restart": ["start"],
   "thankyou": ["thanks"]
 }

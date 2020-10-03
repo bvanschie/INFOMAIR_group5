@@ -87,17 +87,8 @@ def apply_inference(restaurant, rules):
     return restaurant
 
 
-# # load json and create model
-# json_file = open('../input/mairdata/data/model.json', 'r')
-# loaded_model_json = json_file.read()
-# json_file.close()
-# model = model_from_json(loaded_model_json)
-# # load weights into new model
-# model.load_weights("../input/mairdata/data/model.h5")
-
+# The database
 restaurant_info = pandas.read_csv("data/restaurant_info.csv")
-# transformer = TfidfTransformer()
-# loaded_vec = CountVectorizer(decode_error="replace", vocabulary=pickle.load(open("../input/mairdata/data/feature.pkl", "rb")))
 
 # Constants
 MIN_LEVENSHTEIN_DISTANCE = 3
@@ -303,15 +294,6 @@ def extract_preferences(user_utterance):
                 preferences[slot_filler] = match.group(1)
                 break
 
-    # Miscellaneous cases (e.g. any)
-    #     if re.search("^any$|^it doesnt matter$", user_utterance):
-    #         if ("food" in current_state):
-    #             preferences["food"] = "dontcare"
-    #         elif ("area" in current_state):
-    #             preferences["area"] = "dontcare"
-    #         elif ("price" in current_state):
-    #             preferences["pricerange"] = "dontcare"
-
     # save cases with 'any' in the utterances as dontcare
     for pref_name, pref_value in preferences.items():
         if pref_value == "any":
@@ -500,15 +482,10 @@ def inform_response(dialog_state, user_utterance):
     """
     prefs, conf = extract_preferences(user_utterance)
     # Updating the state with w/e is extracted from the utterance.
-    print(f"LOG::Extracted preferences: {prefs}")
     dialog_state["values"].update(prefs)
     dialog_state["confident"].update(conf)
     #     # If confident of some slots is false it means we used a levansthein distance ==> not sure about it,
     #     # ask to be sure. We only ask one slot at a time.
-    #     unsure = [(k, dialog_state["values"][k]) for k, v in dialog_state["confident"].items() if not v]
-    #     if len(unsure) > 0:
-    #         msg = f"Please confirm that I understood you correctly: {unsure[0][0]} to be {unsure[0][1]}?"
-    #     else:
     msg = generate_question(dialog_state)
     if msg:  # Not all slots are filled, because there is still a question to ask.
         # Make a suggestion to see how many restaurants are suitable so far.
@@ -534,105 +511,10 @@ def inform_response(dialog_state, user_utterance):
         dialog_state, msg = suggest(dialog_state)
     return dialog_state, msg
 
-    ############################################################################################################################## --- OLD
-
-    needs_confirm = False
-    system_utterance = ""
-    preferences = extract_preferences(dialog_state)
-
-    # Apply Levenshtein Edit Distance if no exact match with domain terms is found
-    for pref_name, pref_value in preferences.items():
-        if pref_value not in domain_terms[pref_name] and pref_value != "dontcare":
-            levenshtein, _ = levenshtein_edit_distance(pref_value=pref_value, domains=[pref_name])
-
-            if levenshtein == False:  # if no match is found in the database, return feedback to user
-                dialog_state["system_utterances"].insert(0,
-                                                         f'I am sorry but there is no restaurant with {pref_value} {pref_name}.')
-                return dialog_state
-            else:
-                needs_confirm = True
-
-                preferences[pref_name] = levenshtein[pref_name]
-                # return dialog_state
-            # preferences[levenshtein["domain"]] = levenshtein["term"]
-
-    # Fill slots
-    for slot in dialog_state["slots"]:
-        for pref_name, pref_value in preferences.items():
-            if slot["name"] == pref_name:
-                slot["filler"] = pref_value
-                break
-
-    # Create a list of filters
-    query = ""
-    restaurant_filters = []
-    for slot in dialog_state["slots"]:
-        if slot["filler"] != "dontcare":
-            restaurant_filters.append(f'{slot["name"]} == \'{slot["filler"]}\'')
-
-    # Build query to find matching restaurants
-    if not restaurant_filters:
-        # all restaurants
-        query = "ilevel_0 in ilevel_0"
-    else:
-        query = "(" + ") and (".join(restaurant_filters) + ")"
-
-    dialog_state["matched_restaurants"] = query_restaurant_info(query=query)
-
-    # Decide based on number of found matching restaurants
-    num_matched_restaurants = len(dialog_state["matched_restaurants"])
-
-    # Assignment: If the number of restaurants satisfying the current set of preferences is 0, then the user should be informed and given the option to retract and restate any number of previously stated preferences.
-    if num_matched_restaurants == 0:
-        # Assigment: If the number of restaurants satisfying the current set of preferences is 0 then the system should offer alternatives for the conflicting preferences.
-        # Assigmment: TODO The alternatives should be modeled using a set membership function. Of course an alternative should only be offered if the new set of preferences is satisfiable in the database.
-
-        random.shuffle(restaurant_filters)
-        del restaurant_filters[0]
-        query = "(" + ") and (".join(restaurant_filters) + ")"
-        dialog_state["alternative_restaurants"] = query_restaurant_info(query)
-        restaurant_one = dialog_state["alternative_restaurants"][0]
-        restaurant_two = dialog_state["alternative_restaurants"][1]
-
-        system_utterance = f"""there are no suggestions that satisfy your preferences.
-          The following restaurants are available:
-      1. Restaurant {restaurant_one["restaurantname"]} serving {restaurant_one["food"]} in {restaurant_one["area"]} part of town for {restaurant_one["price_type"]}
-      2. Restaurant {restaurant_two["restaurantname"]} serving {restaurant_two["food"]} in {restaurant_two["area"]} part of town for {restaurant_two["price_type"]}
-      Do you want to:
-      a. change your preferences
-      b. choose one of these alternatives?
-      """
-
-        dialog_state["system_utterances"].insert(system_utterance, 0)  # TODO: Improve
-        dialog_state["states"].insert(0, f"Suggest restaurant")
-
-
-    # Assignment: If the number of restaurants satisfying the current set of preferences is 1, then the system should not ask any remaining preferences and should immediately present the recommendation.
-    elif num_matched_restaurants == 1:
-        dialog_state["system_utterances"].insert(0, "You can eat Bart's ... ")  # TODO: Improve
-
-    # Assigment: If the number of restaurants satisfying the current set of preferences is 2 or more then the system should proceed normally.
-    elif num_matched_restaurants > 1:
-        for slot in dialog_state["slots"]:
-            if slot["filler"] == "dontcare":
-                dialog_state["system_utterances"].insert(0, slot["question"])
-                dialog_state["states"].insert(0, f"ask {slot['name']}")
-                break
-    if needs_confirm:
-        dialog_state["system_utterances"].insert(0,
-                                                 f'Did you mean a restaurant with {levenshtein[pref_name]} {pref_name}?')
-        for slot in dialog_state["slots"]:
-            if slot["name"] == pref_name:
-                slot["confirmed"] = False
-        needs_confirm = False
-    return dialog_state
-
 
 def bye_response(dialog_state, user_utterance):
     dialog_state["done"] = True
     return dialog_state, "Thank you for choosing our services, goodbye!"
-
-    return dialog_state
 
 
 def confirm_response(dialog_state, user_utterance):
@@ -696,15 +578,12 @@ def request_response(dialog_state, user_utterance):
     restaurant = dialog_state["suitable_restaurants"][idx]
     # Apply inferences.
     restaurant = apply_inference(restaurant, RULES_)
-    print(restaurant)
     info = []
     for d in reqs:
         try:
-            print("In truy with ", d, restaurant[d])
             info.append(f"{d} is {restaurant[d]}")
         except KeyError:
             info.append(f"{d} is unknown.")
-    #     reqs = [f"{d} is {dialog_state['suitable_restaurants'][idx][d]}" for d in reqs]
     msg = ", ".join(info)
     return dialog_state, f"Information about {dialog_state['suitable_restaurants'][idx]['restaurantname']}: " + msg
 
@@ -754,7 +633,6 @@ def state_transition(dialog_state: dict, user_utterance: str):
         return dialog_state, "Caps switched off."
 
     dialog_act = extract_dialog_act(dialog_state, user_utterance)
-    print(f"LOG::Classified as {dialog_act}")
 
     # respond to the different kinds of dialog acts
     if dialog_act == "inform":
@@ -787,12 +665,6 @@ def state_transition(dialog_state: dict, user_utterance: str):
         state, msg = deny_response(dialog_state, user_utterance)
         return state, msg
 
-    elif dialog_act == "null":
-        pass
-
-    elif dialog_act == "repeat":
-        pass  # repeat_response(dialog_state) TODO
-
     elif dialog_act == "reqalts":
         state, msg = reqalt_response(dialog_state, user_utterance)
         return state, msg
@@ -805,17 +677,11 @@ def state_transition(dialog_state: dict, user_utterance: str):
     elif dialog_act == "request":
         return request_response(dialog_state, user_utterance)
 
-    elif dialog_act == "restart":
-        pass
-
-    elif dialog_act == "thankyou":
-        pass  # thankyou_response(dialog_state) TODO
-
     # If no states match, return a question to fill slots.
     msg = generate_question(dialog_state)
     if msg is None:
         msg = "Sorry, I did not understand you."
-    return dialog_state, generate_question(dialog_state)
+    return dialog_state, msg
 
 
 msg = "Welcome to the restaurant recommendation system!"
