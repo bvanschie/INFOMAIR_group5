@@ -1,9 +1,7 @@
-import pickle
-import sys
 import random
 import re
 import numpy as np
-from sklearn.feature_extraction.text import TfidfTransformer, CountVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 import torch
 from torch.nn import Module, ReLU, Linear, Sequential, Dropout
 
@@ -434,18 +432,55 @@ def get_alternatives_msg(dialog_state):
     This function will offer an alternative for one of the preferences in case
     there is no restaurant for the current set of preferences.
     """
+    alternatives = []
+
     for domain in ["food", "pricerange", "area"]:
         for s in ALTS[domain]:
-            # If the current value is in the set find another and test it.
+            # If the current value is in the set find another and machine training it.
             if dialog_state["values"][domain] in s:
                 for member in s:
                     new_prefs = copy.deepcopy(dialog_state)
-                    new_prefs["values"][domain] = member
+                    new_prefs["values"][domain] = member.lower()
                     rs = query_restaurant_info(generate_query(new_prefs))
-                    if len(rs):
-                        return f"Sorry, no restaurant is found given your preferences. You can try {domain} to be {member} instead."
-    # If there is nothing we can do anymore.
-    return "Sorry, no restaurants found with your preferences. Try something else!"
+                    if rs:
+                        for r in rs:
+                            if r not in alternatives:
+                                alternatives.append(r)
+
+
+    number_of_alternatives = 2
+
+    # Supplement the alternatives when needed
+    for _ in range(len(alternatives), number_of_alternatives):
+        random_choice = random.choice(query_restaurant_info("ilevel_0 in ilevel_0"))
+        alternatives.append(random_choice)
+
+
+    # Randomly pick two alternatives from the list
+    alternatives_suggest = []
+    for alternative in range(number_of_alternatives):
+        random_choice = random.choice(alternatives)
+        alternatives_suggest.append(random_choice)
+        dialog_state["suitable_restaurants"].append(random_choice)
+        alternatives.remove(random_choice)
+
+
+    # Build up the string to offer alternatives
+    alternatives_str = ""
+    for i, a in enumerate(alternatives_suggest):
+        alternatives_str += f"{i+1}. {a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
+
+
+    msg = f"""
+There are no suggestions that satisfy your preferences.
+The following suggestions are available:
+{alternatives_str}
+Do you want to:
+a. Change your preferences (type "change")
+b. Choose one of these alternatives (type "restaurant [number])"
+    """
+
+    return dialog_state, msg
 
 
 def get_suggest_msg(dialog_state):
@@ -453,7 +488,7 @@ def get_suggest_msg(dialog_state):
     Returns the prompt with information about the current suggested restaurant.
     """
     r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
-    return f"{r['restaurantname']} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."
+    return f"{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."
 
 
 def suggest(dialog_state):
@@ -497,9 +532,9 @@ def inform_response(dialog_state, user_utterance):
 
             # No match. Offers alternatives.
             if len(r) == 0:
-                msg = get_alternatives_msg(dialog_state)
+                dialog_state, msg = get_alternatives_msg(dialog_state)
             # Only one match, suggest it.
-            if len(r) == 1:
+            elif len(r) == 1:
                 msg = suggestion
             else:
                 # Undo the suggestion if it is not obvious.
@@ -588,6 +623,36 @@ def request_response(dialog_state, user_utterance):
     return dialog_state, f"Information about {dialog_state['suitable_restaurants'][idx]['restaurantname']}: " + msg
 
 
+def difficult_cases(dialog_act, user_utterance):
+    """
+    Deals with difficult cases which are hard to classify
+    """
+
+    regexes = {
+        "inform": [
+            "looking for unintelligible"
+        ],
+        "deny": [
+           "dont",
+            "don't"
+        ],
+        "request": [
+            "romantic",
+            "busy",
+            "long time",
+            "children"
+        ]
+    }
+
+    for act, regexes in regexes.items():
+        for regex in regexes:
+            if re.search(regex, user_utterance):
+                dialog_act = act
+                break
+
+    return dialog_act
+
+
 def state_transition(dialog_state: dict, user_utterance: str):
     """
     The main dialog manager though which everything runs
@@ -632,7 +697,17 @@ def state_transition(dialog_state: dict, user_utterance: str):
         dialog_state["allcaps"] = False
         return dialog_state, "Caps switched off."
 
+    if user_utterance == "change":
+        return dialog_state, "Sure, you can now change your preferences. You can search for restaurants by area, price range or food type"
+
+    if re.search("^restaurant (\d$)", user_utterance):
+        index = int(re.search("^restaurant (\d$)", user_utterance).group(1))- 1
+        dialog_state["current_index"] = index
+        return dialog_state, get_suggest_msg(dialog_state)
+
+
     dialog_act = extract_dialog_act(dialog_state, user_utterance)
+    dialog_act = difficult_cases(user_utterance=user_utterance, dialog_act=dialog_act)
 
     # respond to the different kinds of dialog acts
     if dialog_act == "inform":
