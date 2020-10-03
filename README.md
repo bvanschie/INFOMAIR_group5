@@ -1,4 +1,4 @@
-# Dialog System - Utrecht University - Artificial Intelligence - INFOMAIR - Team 5
+# Dialog System
 
 ## Installation
 
