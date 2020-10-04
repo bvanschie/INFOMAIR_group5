@@ -14,6 +14,7 @@ import time
 import json
 import warnings
 
+# remove warnings for a better user experience
 warnings.filterwarnings("ignore")
 
 
@@ -120,6 +121,10 @@ def apply_inference(restaurant, rules, dialog_state):
 
 
 def check_preferences_with_rules(restaurant, dialog_state):
+    """
+    This functions checks whether the additional preferences states by the user (e.g. romantic, long time, loud
+    busy and children) are compatible with the rules
+    """
 
     msg = ""
     a = restaurant
@@ -127,6 +132,7 @@ def check_preferences_with_rules(restaurant, dialog_state):
     recommendations = []
 
     for pref_name, pref_value in dialog_state["additional_preferences"].items():
+        # If the user did not state a preference, we skip it
         if pref_value == None:
             continue
 
@@ -143,12 +149,13 @@ def check_preferences_with_rules(restaurant, dialog_state):
                 else:
                     msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
                     recommendations.append(False)
-                    # restart the system
 
 
     if rule_applied == False:
         msg += f"{a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
 
+    # We use the firstly applied rule as the basis for our recommendation
+    # If the rule goes against the user's wishes, we restart the system and the state
     if recommendations and recommendations[0] == False:
         dialog_state = copy.deepcopy(original_state)
         msg += "There is a conflict between our inference rule and your preference. The system will restart..\n"
@@ -472,7 +479,7 @@ def get_alternatives_msg(dialog_state):
 
     for domain in ["food", "pricerange", "area"]:
         for s in ALTS[domain]:
-            # If the current value is in the set find another and machine training it.
+            # If the current value is in the set find another to query the database with
             if dialog_state["values"][domain] in s:
                 for member in s:
                     new_prefs = copy.deepcopy(dialog_state)
@@ -529,9 +536,7 @@ def get_suggest_msg(dialog_state):
     additional_preferences = any([pref != None for _, pref in dialog_state["additional_preferences"].items()])
 
     if additional_preferences:
-
         msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_, dialog_state)
-
     else:
         msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town.
 
@@ -772,6 +777,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
         return dialog_state, "Caps switched off."
 
     if user_utterance == "change":
+        dialog_state["suitable_restaurants"] = []
         return dialog_state, "Sure, you can now change your preferences. You can search for restaurants by area, price range or food type"
 
     if re.search("^restaurant (\d$)", user_utterance):
@@ -796,7 +802,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
         return state, msg
 
     elif dialog_act == "ack":
-        pass  # ack_response(dialog_state) TODO
+        pass
 
     elif dialog_act == "affirm":
         state, msg = confirm_response(dialog_state, user_utterance)
