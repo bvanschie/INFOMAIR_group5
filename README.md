@@ -16,7 +16,7 @@ If you need one or more packages, here is the complete list of packages:
 - pip install pandas
 - pip install python-levenshtein
 
-After installing these run following command:
+After installing these run the following command:
 - python dialog_system.py
 
 
