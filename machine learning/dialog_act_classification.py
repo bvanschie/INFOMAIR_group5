@@ -20,6 +20,8 @@ import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Dropout
 from tensorflow.keras.optimizers import Adam
+import sklearn.tree as sk_tree
+
 
 import tensorflow as tf
 physical_devices = tf.config.list_physical_devices('GPU')
@@ -122,6 +124,37 @@ class KeywordClassifier:
 
         predictions = [find_keyword(s) for s in texts]
         return np.array([self.label_names.index(p) for p in predictions])
+
+
+class DecisionTreeClassifier:
+    def __init__(self, vectorizer: CountVectorizer, max_depth: Union[int, None] = None):
+        """
+        Init.
+        :param vectorizer: The vectorizer to use when converting the string input
+        into bag of words representation.
+        :param max_depth: The maximum depth of the tree.
+        """
+        self.vectorizer = vectorizer
+        self.clf = sk_tree.DecisionTreeClassifier(max_depth=max_depth)
+
+    def __call__(self, texts: np.ndarray):
+        vec = self.vectorizer.transform(texts)
+        vec = np.array(vec.toarray())
+        out = self.clf.predict(vec)
+        return out
+
+    def fit(self, x, y, sample_weights):
+        """
+        Fits the tree.
+        :param x: The data to fit on.
+        :param y: The labels of the data.
+        :param sample_weights: The sample weights to use in case
+        of imbalanced classes.
+        """
+        x = preprocess_data(x, self.vectorizer)
+        y = preprocess_labels(y, mapping=LABELS)
+        self.clf.fit(x, y, sample_weight=sample_weights)
+
 
 def test_classifier(classifier, data: np.ndarray, labels: np.ndarray) -> Tuple[float, np.ndarray]:
     """

@@ -9,7 +9,7 @@ After installing PyTorch you will need the Python Levenshtein library via the fo
 
 ## Inference rules
 
-These are the 12 rules that are implemented in the system:
+These are the 14 rules that are implemented in the system:
 
 ```
 Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food_quality", "good food")], "busy", True),
