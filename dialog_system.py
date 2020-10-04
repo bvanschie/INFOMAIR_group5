@@ -12,6 +12,9 @@ from Levenshtein import distance as levenshtein_distance
 from collections import defaultdict
 import time
 import json
+import warnings
+
+warnings.filterwarnings("ignore")
 
 
 class Antecedent:
@@ -20,7 +23,7 @@ class Antecedent:
         self.value = value
 
     def __repr__(self):
-        return f"{self.name, self.value}"
+        return f"[{self.name, self.value}]"
 
     def __str__(self):
         return self.__repr__()
@@ -32,6 +35,7 @@ class Rule:
         self.antecedents = antecedents
         self.consequent = consequent
         self.truth_value = truth_value
+        self.iteration = None
 
     def __repr__(self):
         return f"{self.identifier}. {self.antecedents} => ({self.consequent}, {self.truth_value})"
@@ -41,7 +45,7 @@ class Rule:
 
 
 RULES_ = [
-    Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food", "good")], "busy", True),
+    Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food_quality", "good food")], "busy", True),
     Rule(2, [Antecedent("food", "spanish")], "long_time", True),
     Rule(3, [Antecedent("busy", True)], "long_time", True),
     Rule(4, [Antecedent("long_time", True)], "children", False),
@@ -53,7 +57,9 @@ RULES_ = [
     Rule(9, [Antecedent("busy", True), Antecedent("children", True)], "loud", True),
     Rule(10, [Antecedent("loud", True)], "romantic", False),
     Rule(11, [Antecedent("busy", False)], "loud", False),
-    Rule(12, [Antecedent("food", "french")], "romantic", True)
+    Rule(12, [Antecedent("food", "french")], "romantic", True),
+    Rule(13, [Antecedent("food", "italian")], "romantic", True),
+    Rule(14, [Antecedent("food", "chinese"),  Antecedent("food_quality", "good food")], "children", True)
 ]
 
 
@@ -69,7 +75,7 @@ def is_applicable(rule, restaurant):
     return True
 
 
-def apply_inference(restaurant, rules):
+def apply_inference(restaurant, rules, dialog_state):
     """
     Applies the provided rules to the restaurant instance.
     :param restaurant: A dictionary representing a restaurant.
@@ -78,15 +84,66 @@ def apply_inference(restaurant, rules):
     are the result of the implications.
     """
     applicable = [...]
+    iteration = 0
+    msg = ""
+
+    restaurant["applied_rules"] = []
+
     while applicable:
+        iteration += 1
         applicable = [r for r in rules if is_applicable(r, restaurant)]
+
         for rule in applicable:
             restaurant[rule.consequent] = rule.truth_value
-    return restaurant
+            rule.iteration = iteration
+            restaurant["applied_rules"].append(rule)
+
+            antecedents = [a.name + ", " + str(a.value) for a in rule.antecedents]
+            antecedents_str = "[" + ("], [").join(antecedents) + "]"
+
+            msg += f"Iteration: {iteration}. Rule {rule.identifier}. {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
+
+
+    msg += check_preferences_with_rules(restaurant, dialog_state)
+
+    return msg
+
+
+def check_preferences_with_rules(restaurant, dialog_state):
+
+    msg = ""
+    a = restaurant
+    rule_applied = False
+
+    for pref_name, pref_value in dialog_state["additional_preferences"].items():
+        if pref_value == None:
+            continue
+
+        for rule in restaurant["applied_rules"]:
+            if rule.consequent == pref_name:
+                rule_applied = True
+
+                antecedents = [a.name + ", " + str(a.value) for a in rule.antecedents]
+                antecedents_str = "[" + ("], [").join(antecedents) + "]"
+
+                if rule.truth_value == pref_value:
+                    msg += f"From iteration: {rule.iteration}. this restaurant is recommended because of rule {antecedents_str} > {rule.consequent}\n"
+                else:
+                    msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent}\n"
+                    # restart the system
+                    dialog_state =  copy.deepcopy(original_state)
+                    msg += f"\nWelcome to the restaurant recommendation system! Please state your preferences.\n"
+
+
+    if rule_applied == False:
+        msg += f"{a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
+
+
+    return msg
 
 
 # The database
-restaurant_info = pandas.read_csv("data/restaurant_info.csv")
+restaurant_info = pandas.read_csv("data/restaurant_info.csv", index_col=0)
 
 # Constants
 MIN_LEVENSHTEIN_DISTANCE = 3
@@ -124,6 +181,12 @@ original_state = {
         "food": True,
         "area": True,
         "pricerange": True
+    },
+    "additional_preferences": {
+        "busy": None,
+        "long_time": None,
+        "children": None,
+        "romantic": None
     },
     # This contains a list of suitable restaurants with the preferences above.
     "suitable_restaurants": [],
@@ -335,49 +398,6 @@ def levenshtein_edit_distance(pref_value, domain):
     return {best_match[0]["domain"]: best_match[0]["term"]}, min_distance
 
 
-def rule_based_dialog_classifier(user_utterance):
-    """
-    Looks for certain words or phrases to deduce which dialog
-    act should be given to the user utterance
-    """
-
-    dialog_act = ""
-
-    regexes = {
-        "inform": [
-            "any part of town",
-            "^any$",
-            "^i want a restaurant",
-            "^im looking for"
-        ],
-        "restart": [
-            "reset",
-            "start over"
-        ],
-        "bye": [
-            "bye",
-            "goodbye"
-        ],
-        "deny": [
-            "no",
-            "wrong"
-        ],
-        "confirm": [
-            "yes",
-            "that is right"
-        ]
-    }
-
-    for act, regexes in regexes.items():
-        for regex in regexes:
-            if re.search(regex, user_utterance):
-                return act
-
-    if dialog_act == "":
-        return BASELINE_DIALOG_ACT
-
-
-# https://queirozf.com/entries/pandas-query-examples-sql-like-syntax-queries-in-dataframes
 def query_restaurant_info(query):
     """
     Query restaurant_info database
@@ -487,8 +507,30 @@ def get_suggest_msg(dialog_state):
     """
     Returns the prompt with information about the current suggested restaurant.
     """
+    msg = ""
     r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
-    return f"{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."
+
+    additional_preferences = any([pref != None for _, pref in dialog_state["additional_preferences"].items()])
+
+    if additional_preferences:
+
+        msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_, dialog_state)
+
+    else:
+        msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town.
+
+    Please inform us whether you want the restaurant to have (one or more of) the following properties:
+    1) Busy
+    2) Long time
+    3) Children
+    4) Romantic
+
+    If you want any of these properties to be true of false, please type the property name and true/false, separated 
+    by a whitespace
+    (e.g. if you want a romantic restaurant with children, type the following: "children true romantic true")            
+"""
+
+    return msg
 
 
 def suggest(dialog_state):
@@ -519,7 +561,7 @@ def inform_response(dialog_state, user_utterance):
     # Updating the state with w/e is extracted from the utterance.
     dialog_state["values"].update(prefs)
     dialog_state["confident"].update(conf)
-    #     # If confident of some slots is false it means we used a levansthein distance ==> not sure about it,
+    #     # If confident of some slots is false it means we used a levensthein distance ==> not sure about it,
     #     # ask to be sure. We only ask one slot at a time.
     msg = generate_question(dialog_state)
     if msg:  # Not all slots are filled, because there is still a question to ask.
@@ -612,7 +654,7 @@ def request_response(dialog_state, user_utterance):
     idx = dialog_state["current_index"]
     restaurant = dialog_state["suitable_restaurants"][idx]
     # Apply inferences.
-    restaurant = apply_inference(restaurant, RULES_)
+    # restaurant = apply_inference(restaurant, RULES_)
     info = []
     for d in reqs:
         try:
@@ -651,6 +693,18 @@ def difficult_cases(dialog_act, user_utterance):
                 break
 
     return dialog_act
+
+
+def update_additional_preferences(matches, dialog_state):
+
+    if matches:
+        for match in matches:
+            for i, group in enumerate(match):
+                if group != "":
+                    dialog_state["additional_preferences"]["_".join(group.split())] = match[i+1] == "true"
+                    break
+
+    return dialog_state
 
 
 def state_transition(dialog_state: dict, user_utterance: str):
@@ -705,6 +759,13 @@ def state_transition(dialog_state: dict, user_utterance: str):
         dialog_state["current_index"] = index
         return dialog_state, get_suggest_msg(dialog_state)
 
+    regex = "(busy)\s(\w+)|(long time)\s(\w+)|(children)\s(\w+)|(romantic)\s(\w+)"
+    if re.findall(regex, user_utterance):
+        matches = re.findall(regex, user_utterance)
+        dialog_state = update_additional_preferences(matches, dialog_state)
+
+        return dialog_state, get_suggest_msg(dialog_state)
+
 
     dialog_act = extract_dialog_act(dialog_state, user_utterance)
     dialog_act = difficult_cases(user_utterance=user_utterance, dialog_act=dialog_act)
@@ -756,6 +817,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
     msg = generate_question(dialog_state)
     if msg is None:
         msg = "Sorry, I did not understand you."
+
     return dialog_state, msg
 
 
