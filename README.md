@@ -1,4 +1,4 @@
-# INFOMAIR_group5
+# Dialog System
 
 ## Installation
 
