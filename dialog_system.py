@@ -149,7 +149,7 @@ def check_preferences_with_rules(restaurant, dialog_state):
     if rule_applied == False:
         msg += f"{a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
 
-    if recommendations[0] == False:
+    if recommendations and recommendations[0] == False:
         dialog_state = copy.deepcopy(original_state)
         msg += "There is a conflict between our inference rule and your preference. The system will restart..\n"
         msg += f"\nWelcome to the restaurant recommendation system! Please state your preferences.\n"
