@@ -545,7 +545,7 @@ def get_suggest_msg(dialog_state):
     2) Long time
     3) Children
     4) Romantic
-    4) Loud
+    5) Loud
 
     If you want any of these properties to be true of false, please type the property name and true/false, separated 
     by a whitespace
