@@ -69,10 +69,20 @@ def is_applicable(rule, restaurant):
     to the given restaurant.
     """
     fields = restaurant.keys()
+    applicable = False
+
     for a in rule.antecedents:
-        if a.name not in fields or a.value != restaurant[a.name] or rule.consequent in fields:
-            return False
-    return True
+
+        # first check if antecedent is true, then check is consequent is not already present in the restaurant info
+        if (a.name in restaurant.keys() and a.value == restaurant[a.name]) and \
+                rule not in restaurant["applied_rules"]:
+            applicable = True
+
+        else:
+            applicable = False
+            break
+
+    return applicable
 
 
 def apply_inference(restaurant, rules, dialog_state):
@@ -111,9 +121,10 @@ def apply_inference(restaurant, rules, dialog_state):
 
 def check_preferences_with_rules(restaurant, dialog_state):
 
-    msg = ""
+    msg = "\n"
     a = restaurant
     rule_applied = False
+    recommended = True
 
     for pref_name, pref_value in dialog_state["additional_preferences"].items():
         if pref_value == None:
@@ -130,14 +141,17 @@ def check_preferences_with_rules(restaurant, dialog_state):
                     msg += f"From iteration: {rule.iteration}. this restaurant is recommended because of rule {antecedents_str} > {rule.consequent}\n"
                 else:
                     msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent}\n"
+                    recommended = False
                     # restart the system
-                    dialog_state =  copy.deepcopy(original_state)
-                    msg += f"\nWelcome to the restaurant recommendation system! Please state your preferences.\n"
 
 
     if rule_applied == False:
         msg += f"{a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
 
+    if recommended == False:
+        dialog_state = copy.deepcopy(original_state)
+        msg += "There is a conflict between our inference rule and your preference. The system will restart..\n"
+        msg += f"\nWelcome to the restaurant recommendation system! Please state your preferences.\n"
 
     return msg
 
