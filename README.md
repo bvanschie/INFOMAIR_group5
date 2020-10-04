@@ -1,18 +1,23 @@
 # Dialog System
 
-## Installation
+## Quick installation
 
 The project uses PyTorch. It can be installed by following the instructions [here](https://pytorch.org/get-started/locally/).
 
 If you already have the neccesary packages installed, you can run the dialog system. Go to the root of the main directory and type the following command in the command line:
 - python dialog_system.py
 
-If you need one or more packages, here is the complete list that you will need:
+## Installation from scratch
+
+If you need one or more packages, here is the complete list of packages:
 - pip install torch==1.6.0+cpu torchvision==0.7.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
 - pip install numpy
 - pip install sklearn
 - pip install pandas
 - pip install python-levenshtein
+
+After installing these run the following command:
+- python dialog_system.py
 
 
 ## Inference rules
