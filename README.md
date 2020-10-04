@@ -7,6 +7,9 @@ The project uses PyTorch. It can be installed by following the instructions [her
 After installing PyTorch you will need the Python Levenshtein library via the following command:
 - pip install python-levenshtein
 
+Now you can run the dialog system:
+- python dialog_system.py
+
 ## Inference rules
 
 These are the 14 rules that are implemented in the system:
