@@ -2,8 +2,7 @@
 
 ## Installation
 
-The project uses PyTorch. It can be installed by following the instructions [he- 
-re](https://pytorch.org/get-started/locally/).
+The project uses PyTorch. It can be installed by following the instructions [here](https://pytorch.org/get-started/locally/).
 
 If you already have the neccesary packages installed, you can run the dialog system. Go to the root of the main directory and type the following command in the command line:
 - python dialog_system.py
