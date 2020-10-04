@@ -121,7 +121,7 @@ def apply_inference(restaurant, rules, dialog_state):
 
 def check_preferences_with_rules(restaurant, dialog_state):
 
-    msg = "\n"
+    msg = ""
     a = restaurant
     rule_applied = False
     recommendations = []
@@ -201,7 +201,8 @@ original_state = {
         "busy": None,
         "long_time": None,
         "children": None,
-        "romantic": None
+        "romantic": None,
+        "loud": None,
     },
     # This contains a list of suitable restaurants with the preferences above.
     "suitable_restaurants": [],
@@ -539,6 +540,7 @@ def get_suggest_msg(dialog_state):
     2) Long time
     3) Children
     4) Romantic
+    4) Loud
 
     If you want any of these properties to be true of false, please type the property name and true/false, separated 
     by a whitespace
@@ -652,7 +654,7 @@ def info_extracting(user_utterance):
         "busy": ["busy"],
         "children": ["children"],
         "long_time": ["long time"],
-        "lout": ["loud"],
+        "loud": ["loud"],
         "romantic": ["romantic"]
     }
     for slot_filler, slot_regexes in regexes.items():
@@ -697,7 +699,8 @@ def difficult_cases(dialog_act, user_utterance):
             "romantic",
             "busy",
             "long time",
-            "children"
+            "children",
+            "loud"
         ]
     }
 
@@ -774,7 +777,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
         dialog_state["current_index"] = index
         return dialog_state, get_suggest_msg(dialog_state)
 
-    regex = "(busy)\s(\w+)|(long time)\s(\w+)|(children)\s(\w+)|(romantic)\s(\w+)"
+    regex = "(loud)\s(\w+)|(busy)\s(\w+)|(long time)\s(\w+)|(children)\s(\w+)|(romantic)\s(\w+)"
     if re.findall(regex, user_utterance):
         matches = re.findall(regex, user_utterance)
         dialog_state = update_additional_preferences(matches, dialog_state)
