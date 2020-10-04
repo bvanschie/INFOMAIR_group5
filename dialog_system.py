@@ -563,6 +563,8 @@ def suggest(dialog_state):
         dialog_state["current_index"] = 0
         if len(suggested) > 0:
             msg = get_suggest_msg(dialog_state)
+        else:
+           _, msg = get_alternatives_msg(dialog_state)
 
     return dialog_state, msg
 
