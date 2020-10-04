@@ -12,7 +12,7 @@ After installing PyTorch you will need the Python Levenshtein library via the fo
 These are the 12 rules that are implemented in the system:
 
 ```
-Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food", "good")], "busy", True),
+Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food_quality", "good food")], "busy", True),
 Rule(2, [Antecedent("food", "spanish")], "long_time", True),
 Rule(3, [Antecedent("busy", True)], "long_time", True),
 Rule(4, [Antecedent("long_time", True)], "children", False),
@@ -24,7 +24,9 @@ Rule(8, [Antecedent("children", True)], "romantic", False),
 Rule(9, [Antecedent("busy", True), Antecedent("children", True)], "loud", True),
 Rule(10, [Antecedent("loud", True)], "romantic", False),
 Rule(11, [Antecedent("busy", False)], "loud", False),
-Rule(12, [Antecedent("food", "french")], "romantic", True)
+Rule(12, [Antecedent("food", "french")], "romantic", True),
+Rule(13, [Antecedent("food", "italian")], "romantic", True),
+Rule(14, [Antecedent("food", "chinese"),  Antecedent("food_quality", "good food")], "children", True)
 ```
 The valid attributes that can be checked are the following: `busy, long_time, children, romantic, popular, loud`. If rules don't apply, the attribute gets the
 unknown status, as it is neither justified nor overruled.
