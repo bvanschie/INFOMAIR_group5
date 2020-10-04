@@ -138,9 +138,9 @@ def check_preferences_with_rules(restaurant, dialog_state):
                 antecedents_str = "[" + ("], [").join(antecedents) + "]"
 
                 if rule.truth_value == pref_value:
-                    msg += f"From iteration: {rule.iteration}. this restaurant is recommended because of rule {antecedents_str} > {rule.consequent}\n"
+                    msg += f"From iteration: {rule.iteration}. this restaurant is recommended because of rule {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
                 else:
-                    msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent}\n"
+                    msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
                     recommended = False
                     # restart the system
 
