@@ -88,7 +88,7 @@ def apply_inference(restaurant, rules):
 
 
 # The database
-restaurant_info = pandas.read_csv("../input/mairdata/data/restaurant_info.csv")
+restaurant_info = pandas.read_csv("data/restaurant_info.csv")
 
 # Constants
 MIN_LEVENSHTEIN_DISTANCE = 3
@@ -233,8 +233,8 @@ class KeywordClassifier:
         return np.array([self.label_names.index(p) for p in predictions])
 
 
-neural_network = torch.load("../input/mairdata/data/ckpt.pyt")
-baseline = KeywordClassifier("../input/mairdata/data/kw.json")
+neural_network = torch.load("data/ckpt.pyt")
+baseline = KeywordClassifier("data/kw.json")
 
 
 # Utility functions
@@ -657,7 +657,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
         state, msg = deny_response(dialog_state, user_utterance)
         return state, msg
 
-    elif dialdog_act == "reqalts":
+    elif dialog_act == "reqalts":
         state, msg = reqalt_response(dialog_state, user_utterance)
         return state, msg
 
