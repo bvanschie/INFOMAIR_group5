@@ -53,3 +53,17 @@ The following options are supported, with examples:
 * Choose which classifier to use (baseline or neural network) `use nn` or `use baseline`.
 * Introduce a delay before showing system responses. `delay on` or `delay off`.
 * OUTPUT IN ALL CAPS OR NOT. `caps on` or `caps off`.
+
+## Experiment
+
+The system for the experiment is located at `experiment.py`. The relevant functions are at the
+bottom of the file.
+* `questionnaire()` contains a list of all questions that will be asked after each interaction.
+* `generate_random_system_msg(state)` can be used to generate a random message based on the
+current dialog state. This message will be shown to the user during `filler` interactions.
+* `get_target(restaurant_info)` generates a goal for the user, eg a location and a food type
+to search for.
+* `get_dynamic_delay(utterance)` returns the number of seconds delay after the user utterance
+when in dynamic delay mode.
+
+The answers to the questions will be saved in a json file.
