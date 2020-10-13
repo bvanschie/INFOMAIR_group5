@@ -744,7 +744,7 @@ def chatbot(state):
         user_utterance = input("(User) ").lower()
         # With 20% chance the system returns a random utterance, based on
         # the current state. The state remains unchanged.
-        if random.random() < 0.2:
+        if state[is_filler] and random.random() < 0.2:
             msg = generate_random_system_msg(state)
             continue
         state, msg = state_transition(state, user_utterance)
@@ -758,6 +758,7 @@ def main():
     data = []
     introduction = "Introduction to the system and the experiment."
     print(introduction)
+    input("Press Enter to continue...")
     for i, (d, f) in enumerate(sessions):
         print(f"Experiment {i + 1}/{len(sessions)}")
         print(f"The goal is: {get_target(restaurant_info)}")
