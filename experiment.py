@@ -1,9 +1,7 @@
-import pickle
-import sys
 import random
 import re
 import numpy as np
-from sklearn.feature_extraction.text import TfidfTransformer, CountVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 import torch
 from torch.nn import Module, ReLU, Linear, Sequential, Dropout
 
@@ -14,6 +12,10 @@ from Levenshtein import distance as levenshtein_distance
 from collections import defaultdict
 import time
 import json
+import warnings
+
+# remove warnings for a better user experience
+warnings.filterwarnings("ignore")
 
 
 class Antecedent:
@@ -22,7 +24,7 @@ class Antecedent:
         self.value = value
 
     def __repr__(self):
-        return f"{self.name, self.value}"
+        return f"[{self.name, self.value}]"
 
     def __str__(self):
         return self.__repr__()
@@ -34,6 +36,7 @@ class Rule:
         self.antecedents = antecedents
         self.consequent = consequent
         self.truth_value = truth_value
+        self.iteration = None
 
     def __repr__(self):
         return f"{self.identifier}. {self.antecedents} => ({self.consequent}, {self.truth_value})"
@@ -43,7 +46,7 @@ class Rule:
 
 
 RULES_ = [
-    Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food", "good")], "busy", True),
+    Rule(1, [Antecedent("pricerange", "cheap"), Antecedent("food_quality", "good food")], "busy", True),
     Rule(2, [Antecedent("food", "spanish")], "long_time", True),
     Rule(3, [Antecedent("busy", True)], "long_time", True),
     Rule(4, [Antecedent("long_time", True)], "children", False),
@@ -55,7 +58,9 @@ RULES_ = [
     Rule(9, [Antecedent("busy", True), Antecedent("children", True)], "loud", True),
     Rule(10, [Antecedent("loud", True)], "romantic", False),
     Rule(11, [Antecedent("busy", False)], "loud", False),
-    Rule(12, [Antecedent("food", "french")], "romantic", True)
+    Rule(12, [Antecedent("food", "french")], "romantic", True),
+    Rule(13, [Antecedent("food", "italian")], "romantic", True),
+    Rule(14, [Antecedent("food", "chinese"), Antecedent("food_quality", "good food")], "children", True)
 ]
 
 
@@ -65,13 +70,23 @@ def is_applicable(rule, restaurant):
     to the given restaurant.
     """
     fields = restaurant.keys()
+    applicable = False
+
     for a in rule.antecedents:
-        if a.name not in fields or a.value != restaurant[a.name] or rule.consequent in fields:
-            return False
-    return True
+
+        # first check if antecedent is true, then check is consequent is not already present in the restaurant info
+        if (a.name in restaurant.keys() and a.value == restaurant[a.name]) and \
+                rule not in restaurant["applied_rules"]:
+            applicable = True
+
+        else:
+            applicable = False
+            break
+
+    return applicable
 
 
-def apply_inference(restaurant, rules):
+def apply_inference(restaurant, rules, dialog_state):
     """
     Applies the provided rules to the restaurant instance.
     :param restaurant: A dictionary representing a restaurant.
@@ -80,15 +95,75 @@ def apply_inference(restaurant, rules):
     are the result of the implications.
     """
     applicable = [...]
+    iteration = 0
+    msg = ""
+
+    restaurant["applied_rules"] = []
+
     while applicable:
+        iteration += 1
         applicable = [r for r in rules if is_applicable(r, restaurant)]
+
         for rule in applicable:
             restaurant[rule.consequent] = rule.truth_value
-    return restaurant
+            rule.iteration = iteration
+            restaurant["applied_rules"].append(rule)
+
+            antecedents = [a.name + ", " + str(a.value) for a in rule.antecedents]
+            antecedents_str = "[" + ("], [").join(antecedents) + "]"
+
+            msg += f"Iteration: {iteration}. Rule {rule.identifier}. {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
+
+    msg += check_preferences_with_rules(restaurant, dialog_state)
+
+    return msg
+
+
+def check_preferences_with_rules(restaurant, dialog_state):
+    """
+    This functions checks whether the additional preferences states by the user (e.g. romantic, long time, loud
+    busy and children) are compatible with the rules
+    """
+
+    msg = ""
+    a = restaurant
+    rule_applied = False
+    recommendations = []
+
+    for pref_name, pref_value in dialog_state["additional_preferences"].items():
+        # If the user did not state a preference, we skip it
+        if pref_value == None:
+            continue
+
+        for rule in restaurant["applied_rules"]:
+            if rule.consequent == pref_name:
+                rule_applied = True
+
+                antecedents = [a.name + ", " + str(a.value) for a in rule.antecedents]
+                antecedents_str = "[" + ("], [").join(antecedents) + "]"
+
+                if rule.truth_value == pref_value:
+                    recommendations.append(True)
+                    msg += f"From iteration: {rule.iteration}. this restaurant is recommended because of rule {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
+                else:
+                    msg += f"From iteration: {rule.iteration}. this restaurant is not recommended because of rule {antecedents_str} > {rule.consequent} = {rule.truth_value}\n"
+                    recommendations.append(False)
+
+    if rule_applied == False:
+        msg += f"{a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
+
+    # We use the firstly applied rule as the basis for our recommendation
+    # If the rule goes against the user's wishes, we restart the system and the state
+    if recommendations and recommendations[0] == False:
+        dialog_state = copy.deepcopy(original_state)
+        msg += "There is a conflict between our inference rule and your preference. The system will restart..\n"
+        msg += f"\nWelcome to the restaurant recommendation system! Please state your preferences.\n"
+
+    return msg
 
 
 # The database
-restaurant_info = pandas.read_csv("data/restaurant_info.csv")
+restaurant_info = pandas.read_csv("data/restaurant_info.csv", index_col=0)
 
 # Constants
 MIN_LEVENSHTEIN_DISTANCE = 3
@@ -126,6 +201,13 @@ original_state = {
         "food": True,
         "area": True,
         "pricerange": True
+    },
+    "additional_preferences": {
+        "busy": None,
+        "long_time": None,
+        "children": None,
+        "romantic": None,
+        "loud": None,
     },
     # This contains a list of suitable restaurants with the preferences above.
     "suitable_restaurants": [],
@@ -337,54 +419,14 @@ def levenshtein_edit_distance(pref_value, domain):
     return {best_match[0]["domain"]: best_match[0]["term"]}, min_distance
 
 
-def rule_based_dialog_classifier(user_utterance):
-    """
-    Looks for certain words or phrases to deduce which dialog
-    act should be given to the user utterance
-    """
-
-    dialog_act = ""
-
-    regexes = {
-        "inform": [
-            "any part of town",
-            "^any$",
-            "^i want a restaurant",
-            "^im looking for"
-        ],
-        "restart": [
-            "reset",
-            "start over"
-        ],
-        "bye": [
-            "bye",
-            "goodbye"
-        ],
-        "deny": [
-            "no",
-            "wrong"
-        ],
-        "confirm": [
-            "yes",
-            "that is right"
-        ]
-    }
-
-    for act, regexes in regexes.items():
-        for regex in regexes:
-            if re.search(regex, user_utterance):
-                return act
-
-    if dialog_act == "":
-        return BASELINE_DIALOG_ACT
-
-
-# https://queirozf.com/entries/pandas-query-examples-sql-like-syntax-queries-in-dataframes
 def query_restaurant_info(query):
     """
     Query restaurant_info database
     :return: list of dicts representing found records in database
     """
+    results = restaurant_info.query(query).to_dict('records')
+    return results
+
     results = restaurant_info.query(query).to_dict('records')
     return results
 
@@ -434,26 +476,79 @@ def get_alternatives_msg(dialog_state):
     This function will offer an alternative for one of the preferences in case
     there is no restaurant for the current set of preferences.
     """
+    alternatives = []
+
     for domain in ["food", "pricerange", "area"]:
         for s in ALTS[domain]:
-            # If the current value is in the set find another and test it.
+            # If the current value is in the set find another to query the database with
             if dialog_state["values"][domain] in s:
                 for member in s:
                     new_prefs = copy.deepcopy(dialog_state)
-                    new_prefs["values"][domain] = member
+                    new_prefs["values"][domain] = member.lower()
                     rs = query_restaurant_info(generate_query(new_prefs))
-                    if len(rs):
-                        return f"Sorry, no restaurant is found given your preferences. You can try {domain} to be {member} instead."
-    # If there is nothing we can do anymore.
-    return "Sorry, no restaurants found with your preferences. Try something else!"
+                    if rs:
+                        for r in rs:
+                            if r not in alternatives:
+                                alternatives.append(r)
+
+    number_of_alternatives = 2
+
+    # Supplement the alternatives when needed
+    for _ in range(len(alternatives), number_of_alternatives):
+        random_choice = random.choice(query_restaurant_info("ilevel_0 in ilevel_0"))
+        alternatives.append(random_choice)
+
+    # Randomly pick two alternatives from the list
+    alternatives_suggest = []
+    for alternative in range(number_of_alternatives):
+        random_choice = random.choice(alternatives)
+        alternatives_suggest.append(random_choice)
+        dialog_state["suitable_restaurants"].append(random_choice)
+        alternatives.remove(random_choice)
+
+    # Build up the string to offer alternatives
+    alternatives_str = ""
+    for i, a in enumerate(alternatives_suggest):
+        alternatives_str += f"{i + 1}. {a['restaurantname'].capitalize()} serves {a['pricerange']} priced {a['food']} food at the {a['area']} part of town.\n"
+
+    msg = f"""
+There are no suggestions that satisfy your preferences.
+The following suggestions are available:
+{alternatives_str}
+Do you want to:
+a. Change your preferences (type "change")
+b. Choose one of these alternatives (type "restaurant [number])"
+    """
+
+    return dialog_state, msg
 
 
 def get_suggest_msg(dialog_state):
     """
     Returns the prompt with information about the current suggested restaurant.
     """
+    msg = ""
     r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
-    return f"{r['restaurantname']} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."
+
+    additional_preferences = any([pref != None for _, pref in dialog_state["additional_preferences"].items()])
+
+    if additional_preferences:
+        msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_,
+                               dialog_state)
+    else:
+        msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town.
+    Please inform us whether you want the restaurant to have (one or more of) the following properties:
+    1) Busy
+    2) Long time
+    3) Children
+    4) Romantic
+    5) Loud
+    If you want any of these properties to be true of false, please type the property name and true/false, separated 
+    by a whitespace
+    (e.g. if you want a romantic restaurant with children, type the following: "children true romantic true")            
+"""
+
+    return msg
 
 
 def suggest(dialog_state):
@@ -469,6 +564,8 @@ def suggest(dialog_state):
         dialog_state["current_index"] = 0
         if len(suggested) > 0:
             msg = get_suggest_msg(dialog_state)
+        else:
+            _, msg = get_alternatives_msg(dialog_state)
 
     return dialog_state, msg
 
@@ -484,7 +581,7 @@ def inform_response(dialog_state, user_utterance):
     # Updating the state with w/e is extracted from the utterance.
     dialog_state["values"].update(prefs)
     dialog_state["confident"].update(conf)
-    #     # If confident of some slots is false it means we used a levansthein distance ==> not sure about it,
+    #     # If confident of some slots is false it means we used a levensthein distance ==> not sure about it,
     #     # ask to be sure. We only ask one slot at a time.
     msg = generate_question(dialog_state)
     if msg:  # Not all slots are filled, because there is still a question to ask.
@@ -497,9 +594,9 @@ def inform_response(dialog_state, user_utterance):
 
             # No match. Offers alternatives.
             if len(r) == 0:
-                msg = get_alternatives_msg(dialog_state)
+                dialog_state, msg = get_alternatives_msg(dialog_state)
             # Only one match, suggest it.
-            if len(r) == 1:
+            elif len(r) == 1:
                 msg = suggestion
             else:
                 # Undo the suggestion if it is not obvious.
@@ -560,7 +657,7 @@ def info_extracting(user_utterance):
         "busy": ["busy"],
         "children": ["children"],
         "long_time": ["long time"],
-        "lout": ["loud"],
+        "loud": ["loud"],
         "romantic": ["romantic"]
     }
     for slot_filler, slot_regexes in regexes.items():
@@ -577,7 +674,7 @@ def request_response(dialog_state, user_utterance):
     idx = dialog_state["current_index"]
     restaurant = dialog_state["suitable_restaurants"][idx]
     # Apply inferences.
-    restaurant = apply_inference(restaurant, RULES_)
+    # restaurant = apply_inference(restaurant, RULES_)
     info = []
     for d in reqs:
         try:
@@ -586,6 +683,48 @@ def request_response(dialog_state, user_utterance):
             info.append(f"{d} is unknown.")
     msg = ", ".join(info)
     return dialog_state, f"Information about {dialog_state['suitable_restaurants'][idx]['restaurantname']}: " + msg
+
+
+def difficult_cases(dialog_act, user_utterance):
+    """
+    Deals with difficult cases which are hard to classify
+    """
+
+    regexes = {
+        "inform": [
+            "looking for unintelligible"
+        ],
+        "deny": [
+            "dont",
+            "don't"
+        ],
+        "request": [
+            "romantic",
+            "busy",
+            "long time",
+            "children",
+            "loud"
+        ]
+    }
+
+    for act, regexes in regexes.items():
+        for regex in regexes:
+            if re.search(regex, user_utterance):
+                dialog_act = act
+                break
+
+    return dialog_act
+
+
+def update_additional_preferences(matches, dialog_state):
+    if matches:
+        for match in matches:
+            for i, group in enumerate(match):
+                if group != "":
+                    dialog_state["additional_preferences"]["_".join(group.split())] = match[i + 1] == "true"
+                    break
+
+    return dialog_state
 
 
 def state_transition(dialog_state: dict, user_utterance: str):
@@ -624,7 +763,24 @@ def state_transition(dialog_state: dict, user_utterance: str):
         dialog_state["allcaps"] = False
         return dialog_state, "Caps switched off."
 
+    if user_utterance == "change":
+        dialog_state["suitable_restaurants"] = []
+        return dialog_state, "Sure, you can now change your preferences. You can search for restaurants by area, price range or food type"
+
+    if re.search("^restaurant (\d$)", user_utterance):
+        index = int(re.search("^restaurant (\d$)", user_utterance).group(1)) - 1
+        dialog_state["current_index"] = index
+        return dialog_state, get_suggest_msg(dialog_state)
+
+    regex = "(loud)\s(\w+)|(busy)\s(\w+)|(long time)\s(\w+)|(children)\s(\w+)|(romantic)\s(\w+)"
+    if re.findall(regex, user_utterance):
+        matches = re.findall(regex, user_utterance)
+        dialog_state = update_additional_preferences(matches, dialog_state)
+
+        return dialog_state, get_suggest_msg(dialog_state)
+
     dialog_act = extract_dialog_act(dialog_state, user_utterance)
+    dialog_act = difficult_cases(user_utterance=user_utterance, dialog_act=dialog_act)
 
     # respond to the different kinds of dialog acts
     if dialog_act == "inform":
@@ -632,7 +788,7 @@ def state_transition(dialog_state: dict, user_utterance: str):
         return state, msg
 
     elif dialog_act == "ack":
-        pass  # ack_response(dialog_state) TODO
+        pass
 
     elif dialog_act == "affirm":
         state, msg = confirm_response(dialog_state, user_utterance)
@@ -673,62 +829,64 @@ def state_transition(dialog_state: dict, user_utterance: str):
     msg = generate_question(dialog_state)
     if msg is None:
         msg = "Sorry, I did not understand you."
+
     return dialog_state, msg
 
 
-########## --- EXPERIMENT PART --- ###################
+#### EXPERIMENT ####
 
 def questionnaire():
     """
-    Handles the questionnaire part. Returns a dictionary containing the questions and answers.
+    Prompts the user with questions, and returns a dict with {question: answer} for
+    each question, answer pair in the form.
     """
-    # List of questions.
-    Q = ["How would you rate your experience on a scale of 1-5?", "Are you having a good day?"]
+    # List your questions here.
+    Q = ["How did you like the system?", "Would you want to have one at home?"]
 
     form = dict()
     for q in Q:
         print(q)
         ans = input()
         form[q] = ans
+
     return form
-
-
-def generate_random_system_msg(state) -> str:
-    """
-    Generates a random system utterance based on the dialog state. Used
-    for fillers.
-    """
-    return "I prefer spanish food!"
 
 
 def get_target(restaurant_info):
     """
-    :param restaurant_info: The pandas dataframe, in case we want to
-    check our random target for validity.
-
-    Returns a string with the goal of the conversation. For example,
-    find a chinese restaurant at the south part of town.
+    :param restaurant_info: The pandas dataframe containing the restaurants.
+    This function generates a target for the user, for example "find the telephone number of an Italian restaurant situated in the centre".
     """
-    return "Find a chinese restaurant at the south part of town."
+    return "Find a chinese restaurant in the south part of town."
 
 
-def get_dynamic_delay(utterance) -> int:
+def get_dynamic_delay(user_utterance) -> int:
     """
-    Generates number of seconds delay (int) after
-    the provided user utterance.
+    This function returns the delay in seconds after the user utterance privided.
     """
-    length = len(utterance)
+    length = len(user_utterance)
     if length < 5:
         return 0
-    elif length < 15:
+    elif length < 20:
         return 1
-    elif length < 25:
-        return 2
     else:
         return 3
 
 
-def chatbot(state):
+def get_random_msg(state):
+    """
+    :param state: The dialog state.
+    This function generates a string message based on the state. This message
+    is used as a "random" system utterance to confuse the victim. The state will
+    be left unchanged.
+    """
+    return "I prefer spanish food myself."
+
+
+def system(state):
+    """
+    A single run of the chatbot.
+    """
     msg = "Welcome to the restaurant recommendation system!"
     user_utterance = ""
     while True:
@@ -736,46 +894,47 @@ def chatbot(state):
             time.sleep(2)
         elif state["delay"] == "dynamic_delay":
             time.sleep(get_dynamic_delay(user_utterance))
-        if state["allcaps"]:
-            msg = msg.upper()
         print(f"(System) {msg}")
         if state["done"]:
             break
         user_utterance = input("(User) ").lower()
-        # With 20% chance the system returns a random utterance, based on
-        # the current state. The state remains unchanged.
-        if state[is_filler] and random.random() < 0.2:
-            msg = generate_random_system_msg(state)
+        # If it is a filler, with 20% chance give a random output and leave
+        # the state unchanged.
+        if state["is_filler"] and random.random() < 0.2:
+            msg = get_random_msg(state)
             continue
         state, msg = state_transition(state, user_utterance)
 
 
 def main():
-    # First element of tuple is delay type, second is boolean is_filler.
+    instructions = "Relevant insturctions to be printed before the experminet starts."
+    # The first element in the tuple indicates the delay type, the second is a boolean is_filler.
     sessions = [("no_delay", False), ("static_delay", False), ("dynamic_delay", False), ("no_delay", True),
                 ("static_delay", True), ("dynamic_delay", True)]
     random.shuffle(sessions)
-    data = []
-    introduction = "Introduction to the system and the experiment."
-    print(introduction)
+    # Contains all questions and answers of the user after each run.
+    # List of tuples (session_type, {question: answer}) for all 6 sessions, for all questions.
+    evaluations = []
+    print(instructions)
     input("Press Enter to continue...")
     for i, (d, f) in enumerate(sessions):
-        print(f"Experiment {i + 1}/{len(sessions)}")
-        print(f"The goal is: {get_target(restaurant_info)}")
+        print(f"Starting experiment {i + 1}/{len(sessions)}")
+        goal = get_target(restaurant_info)
+        print(f"Goal: {goal}")
         state = copy.deepcopy(original_state)
+        # Set the appropriate delay.
         state["delay"] = d
         state["is_filler"] = f
-        chatbot(state)
-        print("===================")
-        print("Please fill in the questionnaire about the last conversation.")
-        ans = questionnaire()
-        ans["delay"] = d
-        ans["is_filler"] = f
-        data.append(ans)
-    print("Thank you for participating in our experiment!")
-    # Save the answers.
+        # Run the session.
+        system(state)
+        evaluation = questionnaire()
+        evaluation["delay"] = d
+        evaluation["is_filler"] = f
+        evaluations.append(evaluation)
+    # Save the questions and answers.
+    print("Thank you for participating in the experiment!")
     with open(f"{int(time.time())}.json", 'w') as file:
-        json.dump(data, file)
+        json.dump(evaluations, file)
 
 
 main()
