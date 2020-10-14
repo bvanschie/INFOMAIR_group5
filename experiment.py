@@ -536,17 +536,7 @@ def get_suggest_msg(dialog_state):
         msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_,
                                dialog_state)
     else:
-        msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town.
-    Please inform us whether you want the restaurant to have (one or more of) the following properties:
-    1) Busy
-    2) Long time
-    3) Children
-    4) Romantic
-    5) Loud
-    If you want any of these properties to be true of false, please type the property name and true/false, separated 
-    by a whitespace
-    (e.g. if you want a romantic restaurant with children, type the following: "children true romantic true")            
-"""
+        msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."""
 
     return msg
 
@@ -835,14 +825,11 @@ def state_transition(dialog_state: dict, user_utterance: str):
 
 #### EXPERIMENT ####
 
-def questionnaire():
+def questionnaire(Q):
     """
     Prompts the user with questions, and returns a dict with {question: answer} for
     each question, answer pair in the form.
     """
-    # List your questions here.
-    Q = ["How did you like the system?", "Would you want to have one at home?"]
-
     form = dict()
     for q in Q:
         print(q)
@@ -887,54 +874,122 @@ def system(state):
     """
     A single run of the chatbot.
     """
+    # This logs all the utterances by the user and the system.
+    utterance_log = []
+
+    def print_(s):
+        """
+        Override that prints and also logs.
+        """
+        utterance_log.append(s)
+        print(s)
+
+    def input_(s):
+        """
+        Override that takes input and also logs.
+        """
+        i = input(s)
+        utterance_log.append(f"{s} {i}")
+        return i
+
     msg = "Welcome to the restaurant recommendation system!"
     user_utterance = ""
+    total_delay = 0
+    n_delays = 0
     while True:
         if state["delay"] == "static_delay":
             time.sleep(2)
         elif state["delay"] == "dynamic_delay":
-            time.sleep(get_dynamic_delay(user_utterance))
-        print(f"(System) {msg}")
+            delay_delta = get_dynamic_delay(user_utterance)
+            time.sleep(delay_delta)
+            total_delay += delay_delta
+            n_delays += 1
+        print_(f"(System) {msg}")
         if state["done"]:
             break
-        user_utterance = input("(User) ").lower()
+        user_utterance = input_("(User) ").lower()
         # If it is a filler, with 20% chance give a random output and leave
         # the state unchanged.
         if state["is_filler"] and random.random() < 0.2:
             msg = get_random_msg(state)
             continue
         state, msg = state_transition(state, user_utterance)
+    return utterance_log, {"total_delay": total_delay, "number_of_delays": n_delays}
 
 
 def main():
-    instructions = "Relevant insturctions to be printed before the experminet starts."
-    # The first element in the tuple indicates the delay type, the second is a boolean is_filler.
-    sessions = [("no_delay", False), ("static_delay", False), ("dynamic_delay", False), ("no_delay", True),
-                ("static_delay", True), ("dynamic_delay", True)]
+    # Load the texts.
+    with open("data/sys_text.json") as file:
+        sys_text = json.load(file)
+
+    # Randomize the order of dialog types, and the associated goals.
+    goals = sys_text["targets"]
+    random.shuffle(goals)
+
+    sessions = [("no_delay", False), ("no_delay", False), ("dynamic_delay", False), ("dynamic_delay", False)]
     random.shuffle(sessions)
-    # Contains all questions and answers of the user after each run.
-    # List of tuples (session_type, {question: answer}) for all 6 sessions, for all questions.
-    evaluations = []
-    print(instructions)
-    input("Press Enter to continue...")
+
+    # The log of the experiment.
+    experiment_info = {}
+
+    # ======== The actual conversation starts here.
+
+    # Get language preference.
+    lang = ""
+    while lang != "en" and lang != "nl":
+        lang = input("Type 'en' for english or 'nl' for dutch.")
+
+    texts = sys_text[lang]
+    # Ask for personal details.
+    age = input(texts['age'])
+    gender = input(texts['gender'])
+
+    experiment_info["personal_info"] = {"age": age, "gender": gender}
+
+    # Show the instructions.
+    input(texts['introduction'])
+    input(texts['tutorial'])
+    input(texts['tutorial'])
+    input(texts['experiment_overview'])
+
+    # The practice dialog.
+    state = copy.deepcopy(original_state)
+    # Set the appropriate delay.
+    state["delay"] = "no_delay"
+    state["is_filler"] = False
+    system(state)
+
+    # List of dialog logs.
+    dialogs = []
+
     for i, (d, f) in enumerate(sessions):
+        print("==================================================")
         print(f"Starting experiment {i + 1}/{len(sessions)}")
-        goal = get_target(restaurant_info)
+        goal = goals[i]
         print(f"Goal: {goal}")
         state = copy.deepcopy(original_state)
         # Set the appropriate delay.
         state["delay"] = d
         state["is_filler"] = f
+
         # Run the session.
-        system(state)
-        evaluation = questionnaire()
-        evaluation["delay"] = d
-        evaluation["is_filler"] = f
-        evaluations.append(evaluation)
+        start_t = time.time()
+        utterances, delay_info = system(state)
+        end_t = time.time()
+
+        # Evaluation form.
+        print("++++++++++++++++++++++++++++++++++++++++++++++++++")
+        evaluation = questionnaire(texts["questions"])
+        dialog_info = {"log": utterances, "duration_sec": int(end_t - start_t), "questionnaire": evaluation,
+                       "delay_type": d}
+        dialog_info.update(delay_info)
+        dialogs.append(dialog_info)
+    experiment_info["dialogs"] = dialogs
+
     # Save the questions and answers.
     print("Thank you for participating in the experiment!")
     with open(f"{int(time.time())}.json", 'w') as file:
-        json.dump(evaluations, file)
+        json.dump(experiment_info, file)
 
 
 main()
