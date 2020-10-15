@@ -964,7 +964,7 @@ def system(state):
             return utterance_log, {"total_delay": total_delay, "number_of_delays": n_delays}
 
         delay_delta = 0
-        if state["delay"] == "static_delay":
+        if state["delay"] == "no_delay":
             time.sleep(0.2)
         elif state["delay"] == "dynamic_delay":
             delay_delta = get_dynamic_delay(user_utterance, msg)
@@ -975,7 +975,7 @@ def system(state):
         if state["done"]:
             break
         user_utterance = input_("(User) ").lower()
-        if state["delay"] == "dynamic_delay":
+        if state["delay"] == "dynamic_delay" or state["delay"] == "no_delay":
             print("One moment...")
         # If it is a filler, with 20% chance give a random output and leave
         # the state unchanged.
