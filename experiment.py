@@ -13,6 +13,12 @@ from collections import defaultdict
 import time
 import json
 import warnings
+import math
+
+from nltk.tokenize import RegexpTokenizer
+from nltk.tokenize import word_tokenize
+from nltk.tokenize import sent_tokenize
+from nltk.tokenize import SyllableTokenizer
 
 # remove warnings for a better user experience
 warnings.filterwarnings("ignore")
@@ -854,10 +860,58 @@ def get_target(restaurant_info):
     return "Find a chinese restaurant in the south part of town."
 
 
-def get_dynamic_delay(user_utterance) -> int:
+def get_dynamic_delay(user_utterance, msg) -> int:
     """
     This function returns the delay in seconds after the user utterance privided.
     """
+
+    # https://www.nltk.org/api/nltk.tokenize.html
+    # Syllabifies words based on the Sonority Sequencing Principle (SSP)
+
+    SSP = SyllableTokenizer()
+    tokenizer = RegexpTokenizer(r"\w+")
+
+    words_user = tokenizer.tokenize(user_utterance)
+    syllables_user = [SSP.tokenize(word) for word in words_user]
+    syllables_user = [syllable for syllable_list in syllables_user for syllable in syllable_list]
+    sentences_user = sent_tokenize(user_utterance)
+
+    words_sys = tokenizer.tokenize(msg)
+    syllables_sys = [SSP.tokenize(word) for word in words_sys]
+    syllables_sys = [syllable for syllable_list in syllables_sys for syllable in syllable_list]
+    sentences_sys = sent_tokenize(msg)
+
+    if len(sentences_user) == 0:
+        return 0.2
+
+    """
+    The language complexity (C) of a message (m) using average sentence lengths and average syllables per
+    word according to the following formula (Kincaid et al., 1975):
+
+    C(m) = 0.39 * (total words / total sentences) + 11.8 * (total syllables / total words) - 15.59
+
+    """
+
+    C_user = (0.39 * (len(words_user) / len(sentences_user))) + (11.8 * (len(syllables_user) / len(words_user))) - 15.59
+    C_sys = (0.39 * (len(words_sys) / len(sentences_sys))) + (11.8 * (len(syllables_sys) / len(words_sys))) - 15.59
+
+    """
+    Time delay (D) is calculated in seconds for any given message (m) using the complexity value C(m) as input
+
+    D(m) = 0.5 * ln(C(m) + 0.5) + 1.5 if C(m) > 0
+    D(m) = 0                          if C(m) <= 0  
+
+    (natural logarithm is being used, euler e as base)
+    """
+
+    D_user = 0 if C_user <= 0 else 0.5 * (math.log(C_user) + 0.5) + 1.5
+    D_sys = 0 if C_sys <= 0 else 0.5 * (math.log(C_sys) + 0.5) + 1.5
+
+    D_total = D_user + D_sys
+
+    return D_total
+
+    # OLD
     length = len(user_utterance)
     if length < 5:
         return 0
@@ -911,9 +965,9 @@ def system(state):
 
         delay_delta = 0
         if state["delay"] == "static_delay":
-            time.sleep(2)
+            time.sleep(0.2)
         elif state["delay"] == "dynamic_delay":
-            delay_delta = get_dynamic_delay(user_utterance)
+            delay_delta = get_dynamic_delay(user_utterance, msg)
             time.sleep(delay_delta)
             total_delay += delay_delta
             n_delays += 1
@@ -921,6 +975,8 @@ def system(state):
         if state["done"]:
             break
         user_utterance = input_("(User) ").lower()
+        if state["delay"] == "dynamic_delay":
+            print("One moment...")
         # If it is a filler, with 20% chance give a random output and leave
         # the state unchanged.
         if state["is_filler"] and random.random() < 0.2:
