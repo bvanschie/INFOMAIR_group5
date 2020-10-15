@@ -293,7 +293,7 @@ class KeywordClassifier:
         :param keyword_dict: Path to the file containing the keywords for
         the different labels.
         """
-        with open(keyword_dict, 'r') as file:
+        with open("data/sys_text.json", 'r', encoding='utf8') as file:
             self.keywords = json.load(file)
         self.label_names = LABELS
 
@@ -919,7 +919,7 @@ def system(state):
 
 def main():
     # Load the texts.
-    with open("data/sys_text.json") as file:
+    with open("data/sys_text.json", encoding='utf8') as file:
         sys_text = json.load(file)
 
     # Randomize the order of dialog types, and the associated goals.
@@ -937,7 +937,7 @@ def main():
     # Get language preference.
     lang = ""
     while lang != "en" and lang != "nl":
-        lang = input("Type 'en' for english or 'nl' for dutch.")
+        lang = input("Type 'en' for english or 'nl' for dutch.\n")
 
     texts = sys_text[lang]
     # Ask for personal details.
@@ -949,21 +949,21 @@ def main():
     # Show the instructions.
     input(texts['introduction'])
     input(texts['tutorial'])
-    input(texts['tutorial'])
+    #input(texts['tutorial'])
     input(texts['experiment_overview'])
-
+    print("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")
     # The practice dialog.
     state = copy.deepcopy(original_state)
     # Set the appropriate delay.
     state["delay"] = "no_delay"
     state["is_filler"] = False
     system(state)
-
+    input(texts['experiment_beforestart'])
     # List of dialog logs.
     dialogs = []
 
     for i, (d, f) in enumerate(sessions):
-        print("==================================================")
+        print("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n==================================================")
         print(f"Starting experiment {i + 1}/{len(sessions)}")
         goal = goals[i]
         print(f"Goal: {goal}")
@@ -987,7 +987,7 @@ def main():
     experiment_info["dialogs"] = dialogs
 
     # Save the questions and answers.
-    print("Thank you for participating in the experiment!")
+    print("\n\n\n\n\n\n\n\n\n\n\n\n\n Thank you for participating in the experiment!")
     with open(f"{int(time.time())}.json", 'w') as file:
         json.dump(experiment_info, file)
 
