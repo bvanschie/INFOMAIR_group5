@@ -832,8 +832,15 @@ def questionnaire(Q):
     """
     form = dict()
     for q in Q:
-        print(q)
-        ans = input()
+        while True:
+            print(q)
+            ans = input()
+            try:
+                ans = int(ans)
+                if 0 < ans < 8:
+                    break
+            except Exception:
+                pass
         form[q] = ans
 
     return form
@@ -875,13 +882,14 @@ def system(state):
     A single run of the chatbot.
     """
     # This logs all the utterances by the user and the system.
+    start_time = time.time()
     utterance_log = []
 
-    def print_(s):
+    def print_(s, delay):
         """
         Override that prints and also logs.
         """
-        utterance_log.append(s)
+        utterance_log.append(f"{s} - delay={delay}")
         print(s)
 
     def input_(s):
@@ -897,6 +905,11 @@ def system(state):
     total_delay = 0
     n_delays = 0
     while True:
+        # return on timeout. 2 mins
+        if time.time() - start_time > 2*60:
+            return utterance_log, {"total_delay": total_delay, "number_of_delays": n_delays}
+
+        delay_delta = 0
         if state["delay"] == "static_delay":
             time.sleep(2)
         elif state["delay"] == "dynamic_delay":
@@ -904,7 +917,7 @@ def system(state):
             time.sleep(delay_delta)
             total_delay += delay_delta
             n_delays += 1
-        print_(f"(System) {msg}")
+        print_(f"(System) {msg}", delay=delay_delta)
         if state["done"]:
             break
         user_utterance = input_("(User) ").lower()
@@ -957,6 +970,7 @@ def main():
     # Set the appropriate delay.
     state["delay"] = "no_delay"
     state["is_filler"] = False
+    print(f"Goal: {goals[-1]}")
     system(state)
     input(texts['experiment_beforestart'])
     # List of dialog logs.
