@@ -674,7 +674,7 @@ def request_response(dialog_state, user_utterance):
     idx = dialog_state["current_index"]
 
     if not dialog_state["suitable_restaurants"]:
-        return "Something went wrong, please try again"
+        return dialog_state, "Something went wrong, please try something else"
 
 
     restaurant = dialog_state["suitable_restaurants"][idx]
@@ -789,7 +789,8 @@ def state_transition(dialog_state: dict, user_utterance: str):
     dialog_act = difficult_cases(user_utterance=user_utterance, dialog_act=dialog_act)
 
     # respond to the different kinds of dialog acts
-    if dialog_act == "inform":
+    regex = "post code|postcode|phone|address"
+    if dialog_act == "inform" and not bool(re.search(regex, user_utterance)):
         state, msg = inform_response(dialog_state, user_utterance)
         return state, msg
 
