@@ -534,15 +534,19 @@ def get_suggest_msg(dialog_state):
     Returns the prompt with information about the current suggested restaurant.
     """
     msg = ""
-    r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
 
-    additional_preferences = any([pref != None for _, pref in dialog_state["additional_preferences"].items()])
-
-    if additional_preferences:
-        msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_,
-                               dialog_state)
+    if not dialog_state["suitable_restaurants"]:
+        msg = "Something went wrong, please try again"
     else:
-        msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."""
+        r = dialog_state["suitable_restaurants"][dialog_state["current_index"]]
+
+        additional_preferences = any([pref != None for _, pref in dialog_state["additional_preferences"].items()])
+
+        if additional_preferences:
+            msg += apply_inference(dialog_state["suitable_restaurants"][dialog_state["current_index"]], RULES_,
+                                   dialog_state)
+        else:
+            msg += f"""{r['restaurantname'].capitalize()} serves {r['pricerange']} priced {r['food']} food at the {r['area']} part of town."""
 
     return msg
 
@@ -668,7 +672,13 @@ def info_extracting(user_utterance):
 def request_response(dialog_state, user_utterance):
     reqs = info_extracting(user_utterance)
     idx = dialog_state["current_index"]
+
+    if not dialog_state["suitable_restaurants"]:
+        return "Something went wrong, please try again"
+
+
     restaurant = dialog_state["suitable_restaurants"][idx]
+
     # Apply inferences.
     # restaurant = apply_inference(restaurant, RULES_)
     info = []
